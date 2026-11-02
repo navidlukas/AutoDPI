@@ -1,3 +1,15 @@
+# AutoDPI (fork of ByeByeDPI)
+
+AutoDPI adds a one-tap **Find best & connect** button to ByeByeDPI:
+it checks which test sites are blocked, tries 131 ByeDPI strategies,
+re-tests the best 10 three times on all sites, and connects with the most
+reliable (then fastest) one. Next time it only re-checks the saved winner.
+Hold the button to force a full re-test.
+
+The latest APK is built automatically: see the **latest** release.
+
+---
+
 <div align="center">
   <p>
     <img src="https://github.com/romanvht/ByeDPIAndroid/raw/master/.github/images/app.svg" alt="Логотип ByeDPI" width="200" />
