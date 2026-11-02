@@ -1,3 +1,25 @@
+# AutoDPI - one-tap DPI bypass tuner for Android and Windows
+
+AutoDPI finds the DPI-bypass setting that works best on **your** network and switches it on:
+it checks which test sites are blocked, tries every setting, re-tests the best 10 three
+times on all sites, and keeps the most reliable (then fastest) one. The winner is
+remembered per network (each Wi-Fi / mobile data), so next time only a quick check runs.
+
+## Download
+
+| Platform | File | How to use |
+|---|---|---|
+| Android 5+ | [AutoDPI.apk](https://github.com/navidlukas/AutoDPI/releases/download/latest/AutoDPI.apk) | Install, then tap **Find best & connect** (hold it to force a full re-test) |
+| Windows 10/11 | [AutoDPI-Windows.zip](https://github.com/navidlukas/AutoDPI/releases/download/latest/AutoDPI-Windows.zip) | Unzip, edit `test_sites.txt`, double-click `1_START.cmd` |
+
+- **Android** is a fork of [ByeByeDPI](https://github.com/romanvht/ByeByeDPI) (ByeDPI engine, no root needed), with 166 test strategies.
+- **Windows** combines [GoodbyeDPI](https://github.com/ValdikSS/GoodbyeDPI), [zapret](https://github.com/bol-van/zapret) and the
+  [Flowseal](https://github.com/Flowseal/zapret-discord-youtube) presets: 144 settings, plain `.cmd`, portable. Source: [`windows/`](windows/).
+
+If no setting works, the sites are probably blocked by IP address; only a VPN or proxy helps then.
+
+---
+
 <div align="center">
   <p>
     <img src="https://github.com/romanvht/ByeDPIAndroid/raw/master/.github/images/app.svg" alt="Логотип ByeDPI" width="200" />

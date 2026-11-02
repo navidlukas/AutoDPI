@@ -1,0 +1,8 @@
+# One website per line. Lines starting with # are ignored.
+# Put blocked sites here, plus 1-2 normal sites as a control.
+# Optional: add " | word" after a URL - the page must contain that word.
+https://www.youtube.com
+https://discord.com
+https://www.google.com
+https://www.xhamster.com
+https://www.pornhub.com

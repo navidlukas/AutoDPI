@@ -41,17 +41,29 @@ jobs:
           cp app/build/outputs/apk/debug/*universal*.apk out/AutoDPI.apk
           ls -la app/build/outputs/apk/debug/
 
+      - name: Package Windows version
+        run: |
+          cd windows
+          zip -qr ../out/AutoDPI-Windows.zip AutoDPI
+
       - uses: actions/upload-artifact@v4
         with:
-          name: AutoDPI-apk
-          path: out/AutoDPI.apk
+          name: AutoDPI
+          path: |
+            out/AutoDPI.apk
+            out/AutoDPI-Windows.zip
 
       - name: Publish as "latest" release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: AutoDPI latest build
-          body: Automatic build from the latest commit. Download AutoDPI.apk and install it on your phone.
+          body: |
+            Automatic build from the latest commit.
+            - **Android:** download `AutoDPI.apk` and install it on your phone.
+            - **Windows 10/11:** download `AutoDPI-Windows.zip`, unzip it, edit `test_sites.txt`, then double-click `1_START.cmd`.
           prerelease: false
           make_latest: true
-          files: out/AutoDPI.apk
+          files: |
+            out/AutoDPI.apk
+            out/AutoDPI-Windows.zip
