@@ -67,6 +67,13 @@
             android:textColor="?android:textColorSecondary"
             tools:text="127.0.0.1:1080" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/auto_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/autodpi_find_best" />
+
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/strategy_button"
             android:layout_width="wrap_content"
