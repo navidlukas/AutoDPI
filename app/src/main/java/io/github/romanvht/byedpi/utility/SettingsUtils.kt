@@ -267,6 +267,8 @@ object SettingsUtils {
 
             HistoryUtils(context).saveHistory(emptyList())
             DomainListUtils.resetLists(context)
+            // AutoDPI: forget test results too (saved winners are in the cleared preferences)
+            io.github.romanvht.byedpi.services.TestService.forgetResults(context)
 
             setLang("system")
             setTheme("system")

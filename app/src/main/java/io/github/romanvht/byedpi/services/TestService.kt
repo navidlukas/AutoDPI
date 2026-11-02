@@ -39,8 +39,6 @@ class TestService : Service() {
         private const val RESULTS_FILE = "proxy_test_results.json"
         private const val NOTIFICATION_ID = 4
         // AutoDPI
-        const val AUTO_WINNER_KEY = "autodpi_winner"
-        const val AUTO_SCORE_KEY = "autodpi_score"
         private const val AUTO_FINALISTS = 10
         private const val AUTO_ROUNDS = 3
         private val mutableState = MutableStateFlow(TestState())
@@ -79,6 +77,13 @@ class TestService : Service() {
         fun stop() {
             if (!isRunning) return
             mutableState.value = state.value.copy(isStopping = true)
+        }
+
+        /** AutoDPI: used by "reset app" - deletes saved test results. */
+        fun forgetResults(context: Context) {
+            if (isRunning) return
+            synchronized(resultsLock) { File(context.applicationContext.filesDir, RESULTS_FILE).delete() }
+            mutableState.value = TestState(runId = state.value.runId, isLoaded = true)
         }
 
         /** AutoDPI: returns the winning command once after an auto run finished, then clears it. */
@@ -354,13 +359,14 @@ class TestService : Service() {
         configurations: List<Result<Configuration>>,
         forceFull: Boolean,
     ): String? {
-        val prefs = getPreferences()
         val sites = options.sites
+        // the winner is remembered per network (home Wi-Fi, mobile data, ...)
+        val networkKey = NetworkKeyUtils.currentKey(this)
 
-        // 1. quick check of the saved winner
-        val saved = prefs.getString(AUTO_WINNER_KEY, null)
-        val savedScore = prefs.getInt(AUTO_SCORE_KEY, -1)
-        if (!forceFull && !saved.isNullOrBlank() && savedScore > 0) {
+        // 1. quick check of this network's saved winner
+        val savedWinner = NetworkKeyUtils.savedWinner(getPreferences(), networkKey)
+        if (!forceFull && savedWinner != null) {
+            val (saved, savedScore) = savedWinner
             setPhase(1, 1, 1)
             val configuration = withContext(Dispatchers.IO) {
                 runCatching { testConfiguration(this@TestService, saved, options.host, options.port) }.getOrNull()
@@ -371,7 +377,7 @@ class TestService : Service() {
                 checkStrategy(probe, strategies, configuration, options)
                 stopEngine()
                 if (probe.successCount >= savedScore) {
-                    applyWinner(saved, savedScore)
+                    applyWinner(saved, savedScore, networkKey)
                     return saved
                 }
             }
@@ -443,18 +449,13 @@ class TestService : Service() {
         publish(strategies)
         val best = ranked.first()
         if (best.successCount == 0) return null
-        applyWinner(best.command, best.successCount / AUTO_ROUNDS)
+        applyWinner(best.command, best.successCount / AUTO_ROUNDS, networkKey)
         return best.command
     }
 
-    /** AutoDPI: make the command the active strategy and remember it for the next quick check. */
-    private suspend fun applyWinner(command: String, score: Int) {
-        getPreferences().edit(commit = true) {
-            putString(AUTO_WINNER_KEY, command)
-            putInt(AUTO_SCORE_KEY, score)
-            putString("byedpi_cmd_args", command)
-            putBoolean("byedpi_enable_cmd_settings", true)
-        }
+    /** AutoDPI: make the command the active strategy and remember it for this network. */
+    private suspend fun applyWinner(command: String, score: Int, networkKey: String) {
+        NetworkKeyUtils.saveWinner(getPreferences(), networkKey, command, score)
         withContext(Dispatchers.IO) { HistoryUtils(this@TestService).addCommand(command) }
     }
 

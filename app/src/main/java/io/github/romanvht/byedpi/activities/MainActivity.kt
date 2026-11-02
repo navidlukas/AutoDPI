@@ -368,6 +368,11 @@ class MainActivity : BaseActivity() {
             Toast.makeText(this, R.string.test_unavailable, Toast.LENGTH_SHORT).show()
             return
         }
+        // AutoDPI: use the best setting found earlier for this network
+        if (NetworkKeyUtils.switchToNetworkWinner(this)) {
+            updateStrategyButton()
+            Toast.makeText(this, R.string.autodpi_network_switched, Toast.LENGTH_SHORT).show()
+        }
         when (getPreferences().mode()) {
             Mode.VPN -> {
                 val intentPrepare = VpnService.prepare(this)

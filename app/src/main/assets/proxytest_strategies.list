@@ -129,3 +129,38 @@
 -d1+s -At,r,s -o1+s
 -s1+sm -At,r,s -f1+s -t8 -r1+s
 -o1 -At,r,s -d3+s -r1+s
+-f-1 -t6 -Qo
+-f-1 -t6 -Qo,m=-40
+-f-1 -t6 -n ??????????.com -Qr
+-f-1 -t8 -Qo
+-f-1 -t8 -Qo,m=-40
+-f-1 -t8 -n ??????????.com -Qr
+-f-1 -t8 -Y
+-f-1 -t8 -g 128
+-d1 -f-1 -t6 -Qo
+-d1 -f-1 -t6 -Qo,m=-40
+-d1 -f-1 -t6 -n ??????????.com -Qr
+-d1 -f-1 -t8 -Qo
+-d1 -f-1 -t8 -Qo,m=-40
+-d1 -f-1 -t8 -n ??????????.com -Qr
+-d1 -f-1 -t8 -Y
+-d1 -f-1 -t8 -g 128
+-f1+s -t6 -Qo
+-f1+s -t6 -Qo,m=-40
+-f1+s -t6 -n ??????????.com -Qr
+-f1+s -t8 -Qo
+-f1+s -t8 -Qo,m=-40
+-f1+s -t8 -n ??????????.com -Qr
+-f1+s -t8 -Y
+-f1+s -t8 -g 128
+-s1 -f1+s -r1+s -t6 -Qo
+-s1 -f1+s -r1+s -t6 -Qo,m=-40
+-s1 -f1+s -r1+s -t6 -n ??????????.com -Qr
+-s1 -f1+s -r1+s -t8 -Qo
+-s1 -f1+s -r1+s -t8 -Qo,m=-40
+-s1 -f1+s -r1+s -t8 -n ??????????.com -Qr
+-s1 -f1+s -r1+s -t8 -Y
+-s1 -f1+s -r1+s -t8 -g 128
+-d1 -d3+s -Y
+-d1+s -Y
+-s1 -d3+s -Y -r1+s

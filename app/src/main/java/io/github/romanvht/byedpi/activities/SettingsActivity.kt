@@ -80,9 +80,14 @@ class SettingsActivity : BaseActivity() {
         }
 
         R.id.action_reset_settings -> {
-            SettingsUtils.resetSettings(this) {
-                recreate()
-            }
+            AlertDialog.Builder(this)
+                .setTitle(R.string.reset_settings)
+                .setMessage(R.string.autodpi_reset_confirm)
+                .setPositiveButton(R.string.autodpi_reset_yes) { _, _ ->
+                    SettingsUtils.resetSettings(this) { recreate() }
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
             true
         }
 

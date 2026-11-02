@@ -23,7 +23,7 @@
     <string name="title_settings">Settings</string>
     <string name="save_logs">Save logs</string>
     <string name="close_app">Force close</string>
-    <string name="reset_settings">Reset settings</string>
+    <string name="reset_settings">Reset app to defaults</string>
     <string name="export_settings">Export settings</string>
     <string name="import_settings">Import settings</string>
     <string name="backup_settings">General settings</string>
@@ -185,7 +185,7 @@
     <string name="domain_list_update_failed">Failed to update domain list</string>
     <string name="domain_list_deleted">Domain list deleted</string>
     <string name="domain_list_delete_failed">Failed to delete domain list</string>
-    <string name="domain_list_reset">Reset lists</string>
+    <string name="domain_list_reset">Reset lists to default</string>
     <string name="domain_list_reset_done">Lists have been reset</string>
     <string name="main_btn_test">Test</string>
     <string name="main_btn_list">Lists</string>
