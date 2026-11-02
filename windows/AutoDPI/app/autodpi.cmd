@@ -26,11 +26,13 @@ if errorlevel 1 (
 rem ---------- Settings ----------
 rem   QUICK_TIMEOUT = seconds per site in the screening round
 rem   FULL_TIMEOUT  = seconds per site in the final round
+rem   STOP_AFTER    = stop screening once this many settings open every blocked site
 rem   FINALISTS     = settings that go to the final round
 rem   ROUNDS        = times each finalist is tested
-set "QUICK_TIMEOUT=6"
-set "FULL_TIMEOUT=10"
-set "FINALISTS=10"
+set "QUICK_TIMEOUT=3"
+set "FULL_TIMEOUT=8"
+set "STOP_AFTER=3"
+set "FINALISTS=5"
 set "ROUNDS=3"
 
 rem ---------- Paths ----------
@@ -141,18 +143,29 @@ echo [1/3] Without any bypass:
 call :probe %FULL_TIMEOUT% all
 set /a BASE_OK=OK, NB=0
 for /l %%i in (1,1,%N%) do call :base_one %%i
-set "SCREEN=blocked"
-set "SCRN=%NB%"
-if %NB%==0 (
-    set "SCREEN=all"
-    set "SCRN=%N%"
-    call :say "  All sites load already. Testing anyway to find a setting that keeps them working."
-)
-set /a EST=NS*(QUICK_TIMEOUT+3)/60+1
+rem screening set S2[i]: the blocked sites (all sites if none is blocked); FB = first of them
+set /a SCRN=0, FB=0
+for /l %%i in (1,1,%N%) do call :screen_site %%i
+if %NB%==0 call :say "  All sites load already. Testing anyway to find a setting that keeps them working."
+
 echo.
-echo [2/3] Trying %NS% settings ^(up to about %EST% minutes - please wait,
-echo       and avoid browsing or downloading meanwhile^):
-for /l %%j in (1,1,%NS%) do call :screen_one %%j
+echo [2/3] Testing one setting of each type, then more of the types that work
+echo       ^(usually 2-5 minutes - avoid browsing or downloading meanwhile^):
+set /a TESTED=0, PERFECT=0, NG=0
+rem stage A: the first setting of every type
+for /l %%j in (1,1,%NS%) do call :type_rep %%j
+rem stage B: other settings of the types that worked, best type first
+for /l %%g in (1,1,%NG%) do call :type_key %%g
+if not exist "%TMPD%types.txt" goto :stage_c
+sort /r "%TMPD%types.txt" /o "%TMPD%types_sorted.txt"
+for /f "usebackq tokens=2 delims=|" %%g in ("%TMPD%types_sorted.txt") do call :expand_type %%g
+goto :stage_done
+:stage_c
+rem stage C: no type worked at all - try everything that is left
+call :say "  No type worked yet - trying the remaining settings."
+for /l %%j in (1,1,%NS%) do call :screen_once %%j
+:stage_done
+call :say "  Tested !TESTED! of %NS% settings."
 call :stop_engines
 if not exist "%TMPD%screen.txt" goto :nothing_works
 sort /r "%TMPD%screen.txt" /o "%TMPD%screen_sorted.txt"
@@ -224,16 +237,70 @@ if !R[%1]!==1 (
 )
 goto :eof
 
+:screen_site
+rem %1 = site number: is it part of the screening set?
+set "S2[%1]=0"
+if %NB% gtr 0 if !B[%1]!==0 goto :eof
+set "S2[%1]=1"
+set /a SCRN+=1
+if %FB%==0 set "FB=%1"
+goto :eof
+
+:type_rep
+rem %1 = strategy number: test it if it is the first of its type
+set "g=!G[%1]!"
+if defined SEEN_!g! goto :eof
+set "SEEN_!g!=1"
+set /a NG+=1
+set "GL[!NG!]=!g!"
+call :screen_one %1
+set "GOK_!g!=!OK!"
+goto :eof
+
+:type_key
+rem %1 = type number: queue the type for stage B if its first setting opened any site
+set "g=!GL[%1]!"
+set "gok="
+call set "gok=%%GOK_!g!%%"
+if not defined gok goto :eof
+if !gok! leq 0 goto :eof
+set /a K=1000+gok
+>>"%TMPD%types.txt" echo !K!^|!g!
+goto :eof
+
+:expand_type
+rem %1 = type: test its other settings (until STOP_AFTER perfect settings were found)
+for /l %%j in (1,1,%NS%) do call :expand_one %%j %1
+goto :eof
+
+:expand_one
+if "!G[%1]!"=="%2" call :screen_once %1
+goto :eof
+
+:screen_once
+if defined DONE[%1] goto :eof
+if %PERFECT% geq %STOP_AFTER% goto :eof
+call :screen_one %1
+goto :eof
+
 :screen_one
-rem %1 = strategy number: quick test on the blocked sites
-title AutoDPI - testing %1 of %NS%
+rem %1 = strategy number: first blocked site only; the rest only if that one opened
+set "DONE[%1]=1"
+set /a TESTED+=1
+title AutoDPI - testing setting %TESTED% ^(%1 of %NS%^)
 call :run_engine !E[%1]! A[%1]
 if !ENGINE_OK!==0 (
-    call :say "  [%1/%NS%] could not start   !NM[%1]!"
+    set "OK=0"
+    call :say "  [%1] could not start   !NM[%1]!"
     goto :eof
 )
-call :probe %QUICK_TIMEOUT% %SCREEN%
-call :say "  [%1/%NS%] !OK!/%SCRN% ok  avg !AVG! ms   !NM[%1]!"
+call :probe %QUICK_TIMEOUT% first
+set /a OK1=OK, TOT1=TOT, OK=0, TOT=0
+if %OK1% gtr 0 if %SCRN% gtr 1 call :probe %QUICK_TIMEOUT% rest
+set /a OK+=OK1, TOT+=TOT1, AVG=99999
+if %OK% gtr 0 set /a AVG=TOT/OK
+if %OK% geq %SCRN% set /a PERFECT+=1
+call :say "  [%1] !OK!/%SCRN% ok  avg !AVG! ms   !NM[%1]!"
 if !OK! gtr 0 call :addkey !OK! !AVG! "%1" screen.txt
 goto :eof
 
@@ -309,11 +376,12 @@ goto :eof
 
 :read_strategies
 set /a NS=0
-for /f "usebackq eol=# tokens=1,2,* delims=|" %%a in ("%APP%strategies.txt") do (
+for /f "usebackq eol=# tokens=1,2,3,* delims=|" %%a in ("%APP%strategies.txt") do (
     set /a NS+=1
     set "E[!NS!]=%%a"
-    set "NM[!NS!]=%%b"
-    set "A[!NS!]=%%c"
+    set "G[!NS!]=%%b"
+    set "NM[!NS!]=%%c"
+    set "A[!NS!]=%%d"
 )
 goto :eof
 
@@ -516,7 +584,10 @@ goto :eof
 set "R[%1]=0"
 set "T[%1]="
 set "M[%1]=not tested"
-if "%PMODE%"=="blocked" if !B[%1]!==0 goto :eof
+rem modes: all = every site, first = first screening site, rest = the other screening sites
+if "%PMODE%"=="first" if not "%1"=="%FB%" goto :eof
+if "%PMODE%"=="rest" if not "!S2[%1]!"=="1" goto :eof
+if "%PMODE%"=="rest" if "%1"=="%FB%" goto :eof
 set "M[%1]=no connection / timeout"
 set /a PN+=1
 start "" /b cmd /c call "%APP%probe_site.cmd" %1

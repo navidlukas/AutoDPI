@@ -6,7 +6,7 @@ PowerShell, no browser needed. Windows will ask for administrator rights.
 HOW TO USE
   1. Edit test_sites.txt - list blocked sites + 1-2 normal sites.
   2. Double-click 1_START.cmd and click Yes.
-     First time: it tests all settings (about 15-20 minutes), then starts
+     First time: it finds the best setting (usually 2-5 minutes), then starts
      the best one in a minimised window. Start browsing.
   3. Next times: double-click 1_START.cmd again. It checks the saved setting
      in ~30 seconds and starts it (re-tests by itself if it stopped working).
@@ -31,8 +31,16 @@ WHAT IT TESTS (app\strategies.txt - 144 settings, editable)
     fakedsplit / hostfakesplit with different split points and fooling
     (badseq, badsum, md5sig, ts, ttl, autottl), plus decoys that mimic the
     real handshake (padencap, dupsid)
-  Round 1 tests every setting on the blocked sites. The 10 best are then
-  tested 3 times on all sites; most reliable, then fastest, wins.
+  The settings are grouped into 14 types (split, disorder, fake + badseq,
+  fake + ts, ...). How a test runs:
+  1. One setting of each type is tried on the blocked sites.
+  2. Only the other settings of the types that worked are tried (if no type
+     worked, everything else is tried). Testing stops once 3 settings open
+     every blocked site.
+  3. A setting is dropped as soon as the first blocked site fails, and only
+     the first 16 KB of each page is loaded.
+  4. The 5 best are tested 3 times on all sites; most reliable, then
+     fastest, wins.
 
 NOTES
   - Close VPNs and other DPI tools while testing; avoid downloads.
@@ -41,4 +49,5 @@ NOTES
   - If nothing works, the sites are blocked by IP address; only a VPN helps.
   - Antivirus may flag WinDivert (the packet driver both engines use).
     This is a known false alarm.
-  - Settings (timeouts, number of finalists) are at the top of app\autodpi.cmd.
+  - Settings (timeouts, when to stop, number of finalists) are at the top
+    of app\autodpi.cmd.

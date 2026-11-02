@@ -12,9 +12,9 @@ remembered per network (each Wi-Fi / mobile data), so next time only a quick che
 | Android 5+ | [AutoDPI.apk](https://github.com/navidlukas/AutoDPI/releases/download/latest/AutoDPI.apk) | Install, then tap **Find best & connect** (hold it to force a full re-test) |
 | Windows 10/11 | [AutoDPI-Windows.zip](https://github.com/navidlukas/AutoDPI/releases/download/latest/AutoDPI-Windows.zip) | Unzip, edit `test_sites.txt`, double-click `1_START.cmd` |
 
-- **Android** is a fork of [ByeByeDPI](https://github.com/romanvht/ByeByeDPI) (ByeDPI engine, no root needed), with 166 test strategies.
+- **Android** is a fork of [ByeByeDPI](https://github.com/romanvht/ByeByeDPI) (ByeDPI engine, no root needed), with 166 test strategies in 13 types; a full test usually takes a few minutes.
 - **Windows** combines [GoodbyeDPI](https://github.com/ValdikSS/GoodbyeDPI), [zapret](https://github.com/bol-van/zapret) and the
-  [Flowseal](https://github.com/Flowseal/zapret-discord-youtube) presets: 144 settings, plain `.cmd`, portable. Source: [`windows/`](windows/).
+  [Flowseal](https://github.com/Flowseal/zapret-discord-youtube) presets: 144 settings in 14 types (usually tested in 2-5 minutes), plain `.cmd`, portable. Source: [`windows/`](windows/).
 
 If no setting works, the sites are probably blocked by IP address; only a VPN or proxy helps then.
 
