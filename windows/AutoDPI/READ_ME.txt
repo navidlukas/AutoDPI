@@ -33,10 +33,10 @@ WHAT IT TESTS (app\strategies.txt - 144 settings, editable)
     real handshake (padencap, dupsid)
   The settings are grouped into 14 types (split, disorder, fake + badseq,
   fake + ts, ...). How a test runs:
-  0. Encrypted DNS first: 16 DNS-over-HTTPS servers (Quad9, Cloudflare,
+  0. Encrypted DNS first: 15 DNS-over-HTTPS servers (Quad9, Cloudflare,
      Google, AdGuard, Yandex, OpenDNS, Control D, DNS4EU, DNS.SB, CIRA,
-     CleanBrowsing, Hurricane Electric, Digitale Gesellschaft, Switch,
-     AliDNS, LibreDNS) are checked at once and the fastest one is used
+     CleanBrowsing, Hurricane Electric, Switch, AliDNS, LibreDNS) are
+     checked at once and the fastest one is used
      for every site test. Sites that only open with encrypted DNS are shown
      as DNS-BLOCKED - switching DNS fixes them, no DPI setting needed.
   1. One setting of each type is tried on the blocked sites.
@@ -49,9 +49,8 @@ WHAT IT TESTS (app\strategies.txt - 144 settings, editable)
      fastest, wins.
 
 ENCRYPTED DNS FOR BROWSING
-  After the test AutoDPI asks once (default Yes after 15 s) whether to use
-  the chosen DNS server for browsing too. It then sets your network adapter's
-  DNS to that server; Chrome, Edge and Windows 11 encrypt it automatically.
+  Automatic: the fastest encrypted DNS server becomes your computer's DNS.
+  Windows 11 encrypts all DNS; on Windows 10 Chrome, Edge and Firefox do.
   6_RESET_to_defaults.cmd puts your original DNS settings back.
 
 NOTES

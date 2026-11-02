@@ -140,7 +140,7 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
 
         when (mode) {
             Mode.VPN -> {
-                dns.isVisible = privateDnsState !is PrivateDnsState.Configured
+                dns.isVisible = false // AutoDPI: DNS is always encrypted automatically
                 ipv6.isVisible = true
 
                 when (applistType.value) {

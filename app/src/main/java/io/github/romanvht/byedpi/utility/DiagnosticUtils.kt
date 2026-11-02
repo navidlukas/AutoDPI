@@ -45,14 +45,11 @@ object DiagnosticUtils {
             appendLine(value(context, R.string.mode_setting, modeName(context, mode)))
             appendLine(value(context, R.string.private_dns, privateDnsDescription(context, privateDnsState)))
             if (mode == Mode.VPN) {
-                if (privateDnsState !is PrivateDnsState.Configured) {
-                    val dns = preferences.getStringNotNull("dns_ip", "1.1.1.1").ifBlank { context.getString(R.string.dns_system) }
-                    appendLine(value(
-                        context,
-                        R.string.dbs_ip_setting,
-                        dns
-                    ))
-                }
+                appendLine(value(
+                    context,
+                    R.string.dbs_ip_setting,
+                    context.getString(R.string.autodpi_dns_status, DohResolver.currentName(context) ?: "-")
+                ))
                 appendLine(value(
                     context,
                     R.string.ipv6_setting,

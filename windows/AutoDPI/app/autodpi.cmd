@@ -133,7 +133,7 @@ goto :full_test
 
 :quick_go
 call :start_final !SE! SA SN
-call :offer_dns
+call :apply_dns
 echo.
 echo AutoDPI is running in a minimised window. Close that window to stop it.
 goto :finish
@@ -221,12 +221,13 @@ if errorlevel 2 (
 ) else (
     call :install_service !WE! WA WN
 )
-call :offer_dns
+call :apply_dns
 goto :finish
 
 :nothing_works
 call :say "No setting could open the blocked sites."
 echo They are probably blocked by IP address - only a VPN or proxy can help with those.
+call :apply_dns
 rd /s /q "%TMPD%" 2>nul
 pause
 exit /b 1
@@ -669,11 +670,11 @@ rem ======================= ENCRYPTED DNS =======================
 
 :dns_check
 rem Asks every DoH server at once; the fastest one that answers is used for every site test.
-rem Browsing DNS (offer_dns) uses the fastest one that also has plain DNS addresses.
+rem The same server is then set as the computer's DNS (apply_dns).
 set "DOHARGS="
 set "DOHNAME="
 set "DOHIP="
-set /a BESTMS=99999, PLAINMS=99999, NDNS=0, NP=0
+set /a BESTMS=99999, NDNS=0, NP=0
 rem curl older than 7.62 cannot use DoH: "unknown option" gives exit code 2
 "%CURL%" -s -m 2 --doh-url https://127.0.0.1/ -o NUL http://127.0.0.1:9/ >nul 2>&1
 if errorlevel 2 if not errorlevel 3 (
@@ -695,7 +696,6 @@ for %%p in (
     "CIRA Shield|https://private.canadianshield.cira.ca/dns-query|149.112.121.10|149.112.121.10|149.112.122.10|2620:10a:80bb::10"
     "CleanBrowsing|https://doh.cleanbrowsing.org/doh/security-filter/|185.228.168.9|185.228.168.9|185.228.169.9|2a0d:2a00:1::2"
     "Hurricane Electric|https://ordns.he.net/dns-query|74.82.42.42|74.82.42.42|-|2001:470:20::2"
-    "Digitale Gesellschaft|https://dns.digitale-gesellschaft.ch/dns-query|185.95.218.42|-|-|-"
     "Switch|https://dns.switch.ch/dns-query|130.59.31.248|130.59.31.248|-|2001:620:0:ff::2"
     "AliDNS|https://dns.alidns.com/dns-query|223.5.5.5|223.5.5.5|223.6.6.6|2400:3200::1"
     "LibreDNS|https://doh.libredns.gr/dns-query|116.202.176.26|88.198.92.222|-|-"
@@ -774,54 +774,32 @@ if not "!code!"=="200" (
 )
 call :to_ms
 echo   !DP_N[%1]!: !ms! ms
-if !ms! lss !BESTMS! (
-    set /a BESTMS=ms
-    set "DOHNAME=!DP_N[%1]!"
-    set "DOHURL=!DP_U[%1]!"
-    set "DOHPIN=!pin!"
-)
-rem browsing DNS: needs plain addresses for the network adapter
-if "!DP_1[%1]!"=="-" goto :eof
-if !ms! geq !PLAINMS! goto :eof
-set /a PLAINMS=ms
-set "DOHPLAIN=!DP_N[%1]!"
-set "DOHPURL=!DP_U[%1]!"
+if !ms! geq !BESTMS! goto :eof
+set /a BESTMS=ms
+set "DOHNAME=!DP_N[%1]!"
+set "DOHURL=!DP_U[%1]!"
+set "DOHPIN=!pin!"
 set "DOHIP=!DP_1[%1]!"
 set "DOHIP2=!DP_2[%1]!"
 set "DOHIP6=!DP_6[%1]!"
 goto :eof
 
-:offer_dns
-rem Browsing should use the same encrypted DNS. Asked once; 6_RESET_to_defaults.cmd undoes it.
-if not defined DOHIP goto :eof
-set "DNSCHOICE="
-if exist "%RES%dns_choice.txt" set /p DNSCHOICE=<"%RES%dns_choice.txt"
-if defined DNSCHOICE goto :offer_apply
-echo.
-echo Use %DOHPLAIN% encrypted DNS for browsing too? It stops DNS-based blocking.
-echo It changes your network's DNS setting ^(6_RESET_to_defaults.cmd puts it back^).
-choice /c YN /t 15 /d Y /n /m "Y = yes (recommended), N = no. Yes in 15 seconds: "
-rem check the answer right away: in .cmd files "set" resets the errorlevel
-if errorlevel 2 (set "DNSCHOICE=N") else (set "DNSCHOICE=Y")
-> "%RES%dns_choice.txt" echo !DNSCHOICE!
-:offer_apply
-if "!DNSCHOICE!"=="Y" call :apply_dns
-if "!DNSCHOICE!"=="N" if !NDNS! gtr 0 echo Note: !NDNS! site^(s^) are DNS-blocked and will stay blocked with your normal DNS.
-goto :eof
-
 :apply_dns
+rem The fastest encrypted DNS server becomes the computer's DNS (always; 6_RESET puts the old one back).
+if not defined DOHIP goto :eof
 if not exist "%RES%dns_backup.txt" call :backup_dns
 rem every network adapter that has a default route (column 5 = interface number)
 for /f "tokens=4,5" %%a in ('netsh interface ipv4 show route 2^>nul ^| findstr /c:"0.0.0.0/0"') do (
     netsh interface ipv4 set dnsservers name=%%b static %DOHIP% primary validate=no >nul 2>&1
     if not "%DOHIP2%"=="-" netsh interface ipv4 add dnsservers name=%%b %DOHIP2% index=2 validate=no >nul 2>&1
-    if not "%DOHIP6%"=="-" netsh interface ipv6 set dnsservers name=%%b static %DOHIP6% primary validate=no >nul 2>&1
+    rem no IPv6 address for this server: clear IPv6 DNS so all lookups go to it
+    if "%DOHIP6%"=="-" (netsh interface ipv6 set dnsservers name=%%b static none validate=no >nul 2>&1) else (netsh interface ipv6 set dnsservers name=%%b static %DOHIP6% primary validate=no >nul 2>&1)
 )
 rem Windows 11: encrypt system DNS for these servers (ignored on Windows 10)
-for %%s in (%DOHIP% %DOHIP2% %DOHIP6%) do if not "%%s"=="-" netsh dns add encryption server=%%s dohtemplate=%DOHPURL% autoupgrade=yes udpfallback=no >nul 2>&1
+for %%s in (%DOHIP% %DOHIP2% %DOHIP6%) do if not "%%s"=="-" netsh dns add encryption server=%%s dohtemplate=%DOHURL% autoupgrade=yes udpfallback=no >nul 2>&1
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" /v DoHPolicy /t REG_DWORD /d 2 /f >nul 2>&1
 ipconfig /flushdns >nul 2>&1
-echo DNS: now using %DOHPLAIN%. Browsers and Windows 11 encrypt it automatically.
+echo Encrypted DNS: %DOHNAME% is now your DNS.
 goto :eof
 
 :backup_dns

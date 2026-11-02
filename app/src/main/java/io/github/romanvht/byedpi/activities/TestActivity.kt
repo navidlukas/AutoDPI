@@ -28,9 +28,7 @@ import io.github.romanvht.byedpi.data.TestState
 import io.github.romanvht.byedpi.services.ServiceManager
 import io.github.romanvht.byedpi.services.TestService
 import io.github.romanvht.byedpi.services.appStatus
-import io.github.romanvht.byedpi.utility.ClipboardUtils
 import io.github.romanvht.byedpi.utility.HistoryUtils
-import io.github.romanvht.byedpi.utility.PrivateDnsUtils
 import io.github.romanvht.byedpi.utility.getPreferences
 import io.github.romanvht.byedpi.utility.mode
 import kotlinx.coroutines.Dispatchers
@@ -199,9 +197,6 @@ class TestActivity : BaseActivity() {
         if (!state.isRunning && state.auto && state.winner != null) {
             TestService.consumeWinner()?.let { connectWinner() }
         }
-        if (!state.isRunning && state.auto && state.privateDnsHint != null) {
-            TestService.consumePrivateDnsHint()?.let { showPrivateDnsHint(it) }
-        }
     }
 
     private fun autoProgressText(state: TestState): String = when (state.phase) {
@@ -212,17 +207,6 @@ class TestActivity : BaseActivity() {
             if (state.blockedCount > 0) state.blockedCount else 0)
         4 -> getString(R.string.autodpi_phase_final, state.phaseProgress, state.phaseTotal)
         else -> ""
-    }
-
-    /** AutoDPI: the provider fakes DNS answers - Private DNS (DoT) protects every app. */
-    private fun showPrivateDnsHint(hostname: String) {
-        ClipboardUtils.copy(this, hostname, "private_dns", showToast = false)
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.autodpi_private_dns_title)
-            .setMessage(getString(R.string.autodpi_private_dns_message, hostname))
-            .setPositiveButton(R.string.autodpi_private_dns_open) { _, _ -> PrivateDnsUtils.openSettings(this) }
-            .setNegativeButton(R.string.autodpi_later, null)
-            .show()
     }
 
     /** AutoDPI: the winner is already saved as the active strategy - start (or restart) the service. */

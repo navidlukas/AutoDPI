@@ -25,7 +25,6 @@ import io.github.romanvht.byedpi.core.ByeDpiProxyPreferences
 import io.github.romanvht.byedpi.core.ByeDpiProxyUIPreferences
 import io.github.romanvht.byedpi.data.Configuration
 import io.github.romanvht.byedpi.data.Mode
-import io.github.romanvht.byedpi.data.PrivateDnsState
 import io.github.romanvht.byedpi.data.START_ACTION
 import io.github.romanvht.byedpi.utility.*
 import kotlinx.coroutines.CompletableDeferred
@@ -53,9 +52,9 @@ internal class NativeEngine(
             val (defaultHost, defaultPort) = preferences.getProxyIpAndPort()
             val (host, port) = args.toList().checkIpAndPortInArgs()
             return Configuration(
-                args.toList(), host ?: defaultHost, (port ?: defaultPort).toInt(),
-                dns = if (PrivateDnsUtils.getState(context) is PrivateDnsState.Configured) ""
-                    else preferences.getStringNotNull("dns_ip", "1.1.1.1"),
+                // AutoDPI: ByeDPI must look up site names itself (encrypted DNS, see DohResolver)
+                args.filter { it != "-N" && it != "--no-domain" }, host ?: defaultHost, (port ?: defaultPort).toInt(),
+                dns = DohResolver.MAPDNS,
                 ipv6 = preferences.getBoolean("ipv6_enable", false),
                 appListType = preferences.getStringNotNull("applist_type", "disable"),
                 apps = preferences.getSelectedApps(),

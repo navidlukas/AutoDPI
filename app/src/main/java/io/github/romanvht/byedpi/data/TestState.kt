@@ -19,5 +19,4 @@ data class TestState(
     val winner: String? = null,  // command to apply and connect, consumed by the UI
     val dnsProvider: String? = null,     // encrypted DNS server used for the test and the VPN
     val dnsBlockedCount: Int = 0,        // sites that only open with encrypted DNS
-    val privateDnsHint: String? = null,  // suggest this Private DNS name (provider fakes DNS answers)
 )

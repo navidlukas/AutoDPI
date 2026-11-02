@@ -426,6 +426,7 @@ class MainActivity : BaseActivity() {
                 when (mode) {
                     Mode.VPN -> {
                         binding.statusText.setText(R.string.vpn_connected)
+                        showDns()
                     }
 
                     Mode.Proxy -> {
@@ -434,6 +435,16 @@ class MainActivity : BaseActivity() {
                 }
             }
         }
+    }
+
+    /** AutoDPI: the encrypted DNS server in use, shown under "Connected (VPN)". */
+    private fun showDns(retries: Int = 3) {
+        val name = DohResolver.currentName(this)
+        binding.proxyAddress.text = getString(R.string.autodpi_dns_status, name ?: "…")
+        // after connecting, the VPN measures which server is fastest here; show the result
+        if (retries > 0) binding.proxyAddress.postDelayed({
+            if (appStatus.first == AppStatus.Running && appStatus.second == Mode.VPN) showDns(retries - 1)
+        }, 2000)
     }
 
     private fun updateStrategyButton() {

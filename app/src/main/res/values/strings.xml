@@ -254,10 +254,7 @@
     <string name="autodpi_none">No setting could open the blocked sites</string>
     <string name="autodpi_phase_dns">Checking encrypted DNS servers...</string>
     <string name="autodpi_done_dns">Done. Encrypted DNS: %1$s. DNS-blocked sites fixed: %2$d</string>
-    <string name="autodpi_private_dns_title">Turn on Private DNS</string>
-    <string name="autodpi_private_dns_message">Your internet provider fakes DNS answers. For full protection in every app, set Android\'s Private DNS to:\n\n%1$s\n\nThe name is copied - tap Open settings, choose Private DNS, then paste it.</string>
-    <string name="autodpi_private_dns_open">Open settings</string>
-    <string name="autodpi_later">Later</string>
+    <string name="autodpi_dns_status">Encrypted DNS: %1$s</string>
     <string name="autodpi_network_switched">Using the best setting saved for this network</string>
     <string name="autodpi_reset_confirm">This resets all settings, domain lists, saved best settings and test results back to defaults.</string>
     <string name="autodpi_reset_yes">Reset</string>

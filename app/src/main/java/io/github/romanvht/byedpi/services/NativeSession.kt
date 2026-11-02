@@ -25,6 +25,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
 import java.net.InetSocketAddress
+import io.github.romanvht.byedpi.utility.DohResolver
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -201,6 +202,7 @@ internal class NativeSession(
         nativeStarted = true
         startJob = scope.launch {
             try {
+                DohResolver.init(service.applicationContext)
                 val engine = withContext(Dispatchers.IO) { ByeDpiProxy() }
                 proxy = engine
                 proxyThread = runNative("ByeDPI") { engine.startProxy(config.args.toTypedArray()) }
@@ -217,6 +219,16 @@ internal class NativeSession(
                         appendLine("  address: ${config.host}")
                         appendLine("  port: ${config.port}")
                         appendLine("  udp: udp")
+                        if (config.dns == DohResolver.MAPDNS) {
+                            // AutoDPI: the tunnel answers DNS itself and passes site names to ByeDPI,
+                            // which looks them up over encrypted DNS (DohResolver)
+                            appendLine("mapdns:")
+                            appendLine("  address: ${DohResolver.MAPDNS}")
+                            appendLine("  port: 53")
+                            appendLine("  network: 198.18.0.0")
+                            appendLine("  netmask: 255.254.0.0")
+                            appendLine("  cache-size: 10000")
+                        }
                     }
                     tunnelThread = runNative("HEV") { TProxyService.startTunnel(tunnelConfig, fd.fd) }
                     delay(100)

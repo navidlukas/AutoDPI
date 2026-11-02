@@ -12,5 +12,5 @@ target_compile_options(byedpi PRIVATE -std=c99 -O2 -Wall -Wno-unused -Wextra -Wn
 target_compile_definitions(byedpi PRIVATE ANDROID_APP)
 
 target_link_libraries(byedpi PRIVATE android log dl)
-target_link_options(byedpi PRIVATE "-Wl,--wrap=daemon")
+target_link_options(byedpi PRIVATE "-Wl,--wrap=daemon" "-Wl,--wrap=getaddrinfo")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
