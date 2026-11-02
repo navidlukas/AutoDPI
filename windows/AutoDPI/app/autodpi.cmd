@@ -7,8 +7,10 @@ rem  Usage:   autodpi.cmd [start|retest|stop|install|remove|reset]
 rem ============================================================
 setlocal EnableExtensions EnableDelayedExpansion
 set "ACTION=%~1"
+if "%ACTION%"=="_doh" goto :doh_child
 if "%ACTION%"=="" set "ACTION=start"
 set "APP=%~dp0"
+set "SELF=%~f0"
 for %%I in ("%APP%..") do set "ROOT=%%~fI\"
 
 rem ---------- Run as administrator ----------
@@ -666,12 +668,12 @@ goto :eof
 rem ======================= ENCRYPTED DNS =======================
 
 :dns_check
-rem Tries each DoH server; the fastest one that answers is used for every site test.
-rem Sets DOHARGS (extra curl options), DOHNAME, DOHURL and the plain DNS addresses.
+rem Asks every DoH server at once; the fastest one that answers is used for every site test.
+rem Browsing DNS (offer_dns) uses the fastest one that also has plain DNS addresses.
 set "DOHARGS="
 set "DOHNAME="
 set "DOHIP="
-set /a BESTMS=99999, NDNS=0
+set /a BESTMS=99999, PLAINMS=99999, NDNS=0, NP=0
 rem curl older than 7.62 cannot use DoH: "unknown option" gives exit code 2
 "%CURL%" -s -m 2 --doh-url https://127.0.0.1/ -o NUL http://127.0.0.1:9/ >nul 2>&1
 if errorlevel 2 if not errorlevel 3 (
@@ -679,15 +681,35 @@ if errorlevel 2 if not errorlevel 3 (
     goto :eof
 )
 echo Checking encrypted DNS servers:
-rem name | DoH address | DoH host | DoH IP | DNS 1 | DNS 2 | DNS IPv6
+rem name | DoH address | DoH IP | DNS 1 | DNS 2 | DNS IPv6     ("-" = none)
 for %%p in (
-    "Quad9|https://dns.quad9.net/dns-query|dns.quad9.net|9.9.9.9|9.9.9.9|149.112.112.112|2620:fe::fe"
-    "Cloudflare|https://cloudflare-dns.com/dns-query|cloudflare-dns.com|1.1.1.1|1.1.1.1|1.0.0.1|2606:4700:4700::1111"
-    "Google|https://dns.google/dns-query|dns.google|8.8.8.8|8.8.8.8|8.8.4.4|2001:4860:4860::8888"
-    "AdGuard|https://dns.adguard-dns.com/dns-query|dns.adguard-dns.com|94.140.14.14|94.140.14.14|94.140.15.15|2a10:50c0::ad1:ff"
-    "Yandex|https://common.dot.dns.yandex.net/dns-query|common.dot.dns.yandex.net|77.88.8.8|77.88.8.8|77.88.8.1|2a02:6b8::feed:0ff"
-    "OpenDNS|https://doh.opendns.com/dns-query|doh.opendns.com|146.112.41.2|208.67.222.222|208.67.220.220|2620:119:35::35"
-) do call :dns_try %%p
+    "Quad9|https://dns.quad9.net/dns-query|9.9.9.9|9.9.9.9|149.112.112.112|2620:fe::fe"
+    "Cloudflare|https://cloudflare-dns.com/dns-query|1.1.1.1|1.1.1.1|1.0.0.1|2606:4700:4700::1111"
+    "Google|https://dns.google/dns-query|8.8.8.8|8.8.8.8|8.8.4.4|2001:4860:4860::8888"
+    "AdGuard|https://dns.adguard-dns.com/dns-query|94.140.14.14|94.140.14.14|94.140.15.15|2a10:50c0::ad1:ff"
+    "Yandex|https://common.dot.dns.yandex.net/dns-query|77.88.8.8|77.88.8.8|77.88.8.1|2a02:6b8::feed:0ff"
+    "OpenDNS|https://doh.opendns.com/dns-query|146.112.41.2|208.67.222.222|208.67.220.220|2620:119:35::35"
+    "Control D|https://freedns.controld.com/p0|76.76.2.0|76.76.2.0|76.76.10.0|2606:1a40::"
+    "DNS4EU|https://unfiltered.joindns4.eu/dns-query|86.54.11.100|86.54.11.100|86.54.11.200|2a13:1001::86:54:11:100"
+    "DNS.SB|https://doh.dns.sb/dns-query|185.222.222.222|185.222.222.222|45.11.45.11|2a09::"
+    "CIRA Shield|https://private.canadianshield.cira.ca/dns-query|149.112.121.10|149.112.121.10|149.112.122.10|2620:10a:80bb::10"
+    "CleanBrowsing|https://doh.cleanbrowsing.org/doh/security-filter/|185.228.168.9|185.228.168.9|185.228.169.9|2a0d:2a00:1::2"
+    "Hurricane Electric|https://ordns.he.net/dns-query|74.82.42.42|74.82.42.42|-|2001:470:20::2"
+    "Digitale Gesellschaft|https://dns.digitale-gesellschaft.ch/dns-query|185.95.218.42|-|-|-"
+    "Switch|https://dns.switch.ch/dns-query|130.59.31.248|130.59.31.248|-|2001:620:0:ff::2"
+    "AliDNS|https://dns.alidns.com/dns-query|223.5.5.5|223.5.5.5|223.6.6.6|2400:3200::1"
+    "LibreDNS|https://doh.libredns.gr/dns-query|116.202.176.26|88.198.92.222|-|-"
+) do call :dns_launch %%p
+rem wait up to 10 seconds for the answers
+set /a W=0
+:dns_wait
+set /a W+=1, ND=0
+for /l %%i in (1,1,%NP%) do if exist "%TMPD%d%%i.txt" set /a ND+=1
+if %ND% lss %NP% if %W% leq 10 (
+    ping -n 2 127.0.0.1 >nul
+    goto :dns_wait
+)
+for /l %%i in (1,1,%NP%) do call :dns_read %%i
 if not defined DOHNAME (
     echo   No encrypted DNS server answered - using normal DNS.
     goto :eof
@@ -696,49 +718,77 @@ set "DOHARGS=--doh-url %DOHURL% %DOHPIN%"
 echo   Using %DOHNAME% ^(%BESTMS% ms^)
 goto :eof
 
-:dns_try
-rem %1 = one provider line. A standard DoH query for example.com must return HTTP 200.
-for /f "tokens=1-7 delims=|" %%a in (%1) do (
-    set "pn=%%a"
-    set "pu=%%b"
-    set "ph=%%c"
-    set "pi=%%d"
-    set "p1=%%e"
-    set "p2=%%f"
-    set "p6=%%g"
+:dns_launch
+rem %1 = one provider line; DP_*[n] are passed to the background query (:doh_child)
+set /a NP+=1
+for /f "tokens=1-6 delims=|" %%a in (%1) do (
+    set "DP_N[!NP!]=%%a"
+    set "DP_U[!NP!]=%%b"
+    set "DP_I[!NP!]=%%c"
+    set "DP_1[!NP!]=%%d"
+    set "DP_2[!NP!]=%%e"
+    set "DP_6[!NP!]=%%f"
 )
+rem host name = the part between "https://" and the next "/"
+set "h=!DP_U[%NP%]:https://=!"
+set "rest=!h:*/=!"
+call set "DP_H[%NP%]=%%h:/!rest!=%%"
+del "%TMPD%d%NP%.txt" "%TMPD%d%NP%.tmp" >nul 2>&1
+start "" /b cmd /c call "%SELF%" _doh %NP%
+goto :eof
+
+:doh_child
+rem background: one DoH query for example.com, first with the server address fixed
+rem (immune to fake DNS), then via normal lookup. Writes temp\d<n>.txt:
+rem line 1 = "<http code> <seconds>", line 2 = the --resolve pin that worked (if any)
+set "n=%~2"
 set "Q=?dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
-rem first with the server address fixed (immune to fake DNS), then via normal lookup
-set "pin=--resolve !ph!:443:!pi!"
-call :dns_query
+set "pin=--resolve !DP_H[%n%]!:443:!DP_I[%n%]!"
+"%CURL%" -s -o NUL -m 4 !pin! -H "accept: application/dns-message" -w "%%{http_code} %%{time_total}" "!DP_U[%n%]!!Q!" > "%TMPD%d%n%.tmp" 2>nul
+set "code="
+for /f "usebackq tokens=1" %%a in ("%TMPD%d%n%.tmp") do set "code=%%a"
 if not "!code!"=="200" (
     set "pin="
-    call :dns_query
+    "%CURL%" -s -o NUL -m 4 -H "accept: application/dns-message" -w "%%{http_code} %%{time_total}" "!DP_U[%n%]!!Q!" > "%TMPD%d%n%.tmp" 2>nul
 )
+>> "%TMPD%d%n%.tmp" echo.
+if defined pin >> "%TMPD%d%n%.tmp" echo !pin!
+move /y "%TMPD%d%n%.tmp" "%TMPD%d%n%.txt" >nul
+exit /b 0
+
+:dns_read
+set "code="
+set "tt=0.0"
+set "pin="
+if not exist "%TMPD%d%1.txt" goto :dns_none
+for /f "usebackq tokens=1,*" %%a in ("%TMPD%d%1.txt") do (
+    if "%%a"=="--resolve" (set "pin=%%a %%b") else if not defined code (
+        set "code=%%a"
+        set "tt=%%b"
+    )
+)
+:dns_none
 if not "!code!"=="200" (
-    echo   !pn!: no answer
+    echo   !DP_N[%1]!: no answer
     goto :eof
 )
 call :to_ms
-echo   !pn!: !ms! ms
-if !ms! geq !BESTMS! goto :eof
-set /a BESTMS=ms
-set "DOHNAME=!pn!"
-set "DOHURL=!pu!"
-set "DOHPIN=!pin!"
-set "DOHIP=!p1!"
-set "DOHIP2=!p2!"
-set "DOHIP6=!p6!"
-goto :eof
-
-:dns_query
-set "code="
-set "tt=0.0"
-"%CURL%" -s -o NUL -m 4 !pin! -H "accept: application/dns-message" -w "%%{http_code} %%{time_total}" "!pu!!Q!" > "%TMPD%doh.txt" 2>nul
-for /f "usebackq tokens=1,2" %%a in ("%TMPD%doh.txt") do (
-    set "code=%%a"
-    set "tt=%%b"
+echo   !DP_N[%1]!: !ms! ms
+if !ms! lss !BESTMS! (
+    set /a BESTMS=ms
+    set "DOHNAME=!DP_N[%1]!"
+    set "DOHURL=!DP_U[%1]!"
+    set "DOHPIN=!pin!"
 )
+rem browsing DNS: needs plain addresses for the network adapter
+if "!DP_1[%1]!"=="-" goto :eof
+if !ms! geq !PLAINMS! goto :eof
+set /a PLAINMS=ms
+set "DOHPLAIN=!DP_N[%1]!"
+set "DOHPURL=!DP_U[%1]!"
+set "DOHIP=!DP_1[%1]!"
+set "DOHIP2=!DP_2[%1]!"
+set "DOHIP6=!DP_6[%1]!"
 goto :eof
 
 :offer_dns
@@ -748,7 +798,7 @@ set "DNSCHOICE="
 if exist "%RES%dns_choice.txt" set /p DNSCHOICE=<"%RES%dns_choice.txt"
 if defined DNSCHOICE goto :offer_apply
 echo.
-echo Use %DOHNAME% encrypted DNS for browsing too? It stops DNS-based blocking.
+echo Use %DOHPLAIN% encrypted DNS for browsing too? It stops DNS-based blocking.
 echo It changes your network's DNS setting ^(6_RESET_to_defaults.cmd puts it back^).
 choice /c YN /t 15 /d Y /n /m "Y = yes (recommended), N = no. Yes in 15 seconds: "
 rem check the answer right away: in .cmd files "set" resets the errorlevel
@@ -764,14 +814,14 @@ if not exist "%RES%dns_backup.txt" call :backup_dns
 rem every network adapter that has a default route (column 5 = interface number)
 for /f "tokens=4,5" %%a in ('netsh interface ipv4 show route 2^>nul ^| findstr /c:"0.0.0.0/0"') do (
     netsh interface ipv4 set dnsservers name=%%b static %DOHIP% primary validate=no >nul 2>&1
-    netsh interface ipv4 add dnsservers name=%%b %DOHIP2% index=2 validate=no >nul 2>&1
-    netsh interface ipv6 set dnsservers name=%%b static %DOHIP6% primary validate=no >nul 2>&1
+    if not "%DOHIP2%"=="-" netsh interface ipv4 add dnsservers name=%%b %DOHIP2% index=2 validate=no >nul 2>&1
+    if not "%DOHIP6%"=="-" netsh interface ipv6 set dnsservers name=%%b static %DOHIP6% primary validate=no >nul 2>&1
 )
 rem Windows 11: encrypt system DNS for these servers (ignored on Windows 10)
-for %%s in (%DOHIP% %DOHIP2% %DOHIP6%) do netsh dns add encryption server=%%s dohtemplate=%DOHURL% autoupgrade=yes udpfallback=no >nul 2>&1
+for %%s in (%DOHIP% %DOHIP2% %DOHIP6%) do if not "%%s"=="-" netsh dns add encryption server=%%s dohtemplate=%DOHPURL% autoupgrade=yes udpfallback=no >nul 2>&1
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" /v DoHPolicy /t REG_DWORD /d 2 /f >nul 2>&1
 ipconfig /flushdns >nul 2>&1
-echo DNS: now using %DOHNAME%. Browsers and Windows 11 encrypt it automatically.
+echo DNS: now using %DOHPLAIN%. Browsers and Windows 11 encrypt it automatically.
 goto :eof
 
 :backup_dns

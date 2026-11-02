@@ -29,31 +29,43 @@ object DohUtils {
 
     data class Provider(
         val name: String,
-        val dohHost: String,  // DoH server name (TLS certificate)
+        val dohUrl: String,   // DoH address
         val dohIp: String,    // fixed address of the DoH server
-        val dns1: String,     // plain DNS addresses, used as the VPN's DNS server
-        val dns2: String,
+        val dns1: String?,    // plain DNS address for the VPN; null = this server has no plain DNS
         val dotHost: String,  // name for Android's Private DNS (DoT)
-    )
+        val dotIp: String,    // fixed address of the DoT server
+    ) {
+        val dohHost: String get() = java.net.URI(dohUrl).host
+    }
 
     val providers = listOf(
-        Provider("Quad9", "dns.quad9.net", "9.9.9.9", "9.9.9.9", "149.112.112.112", "dns.quad9.net"),
-        Provider("Cloudflare", "cloudflare-dns.com", "1.1.1.1", "1.1.1.1", "1.0.0.1", "one.one.one.one"),
-        Provider("Google", "dns.google", "8.8.8.8", "8.8.8.8", "8.8.4.4", "dns.google"),
-        Provider("AdGuard", "dns.adguard-dns.com", "94.140.14.14", "94.140.14.14", "94.140.15.15", "dns.adguard-dns.com"),
-        Provider("Yandex", "common.dot.dns.yandex.net", "77.88.8.8", "77.88.8.8", "77.88.8.1", "common.dot.dns.yandex.net"),
-        Provider("OpenDNS", "doh.opendns.com", "146.112.41.2", "208.67.222.222", "208.67.220.220", "dns.opendns.com"),
+        Provider("Quad9", "https://dns.quad9.net/dns-query", "9.9.9.9", "9.9.9.9", "dns.quad9.net", "9.9.9.9"),
+        Provider("Cloudflare", "https://cloudflare-dns.com/dns-query", "1.1.1.1", "1.1.1.1", "one.one.one.one", "1.1.1.1"),
+        Provider("Google", "https://dns.google/dns-query", "8.8.8.8", "8.8.8.8", "dns.google", "8.8.8.8"),
+        Provider("AdGuard", "https://dns.adguard-dns.com/dns-query", "94.140.14.14", "94.140.14.14", "dns.adguard-dns.com", "94.140.14.14"),
+        Provider("Yandex", "https://common.dot.dns.yandex.net/dns-query", "77.88.8.8", "77.88.8.8", "common.dot.dns.yandex.net", "77.88.8.8"),
+        Provider("OpenDNS", "https://doh.opendns.com/dns-query", "146.112.41.2", "208.67.222.222", "dns.opendns.com", "208.67.222.222"),
+        Provider("Control D", "https://freedns.controld.com/p0", "76.76.2.0", "76.76.2.0", "p0.freedns.controld.com", "76.76.2.0"),
+        Provider("DNS4EU", "https://unfiltered.joindns4.eu/dns-query", "86.54.11.100", "86.54.11.100", "unfiltered.joindns4.eu", "86.54.11.100"),
+        Provider("DNS.SB", "https://doh.dns.sb/dns-query", "185.222.222.222", "185.222.222.222", "dot.sb", "185.222.222.222"),
+        Provider("CIRA Shield", "https://private.canadianshield.cira.ca/dns-query", "149.112.121.10", "149.112.121.10", "private.canadianshield.cira.ca", "149.112.121.10"),
+        Provider("CleanBrowsing", "https://doh.cleanbrowsing.org/doh/security-filter/", "185.228.168.9", "185.228.168.9", "security-filter-dns.cleanbrowsing.org", "185.228.168.9"),
+        Provider("Hurricane Electric", "https://ordns.he.net/dns-query", "74.82.42.42", "74.82.42.42", "ordns.he.net", "74.82.42.42"),
+        Provider("Digitale Gesellschaft", "https://dns.digitale-gesellschaft.ch/dns-query", "185.95.218.42", null, "dns.digitale-gesellschaft.ch", "185.95.218.43"),
+        Provider("Switch", "https://dns.switch.ch/dns-query", "130.59.31.248", "130.59.31.248", "dns.switch.ch", "130.59.31.248"),
+        Provider("AliDNS", "https://dns.alidns.com/dns-query", "223.5.5.5", "223.5.5.5", "dns.alidns.com", "223.5.5.5"),
+        Provider("LibreDNS", "https://doh.libredns.gr/dns-query", "116.202.176.26", "88.198.92.222", "dot.libredns.gr", "116.202.176.26"),
     )
 
-    /** Fastest provider that answers a DoH query, with its time in ms; null if none answers. */
-    suspend fun pickFastest(timeoutMs: Int): Pair<Provider, Long>? = coroutineScope {
+    /** Providers that answer a DoH query, fastest first, with their time in ms. */
+    suspend fun rankBySpeed(timeoutMs: Int): List<Pair<Provider, Long>> = coroutineScope {
         providers.map { provider ->
             async(Dispatchers.IO) {
                 val started = System.currentTimeMillis()
                 val answer = doh(provider, "example.com", timeoutMs)
                 if (answer.isNullOrEmpty()) null else provider to (System.currentTimeMillis() - started)
             }
-        }.awaitAll().filterNotNull().minByOrNull { it.second }
+        }.awaitAll().filterNotNull().sortedBy { it.second }
     }
 
     /** IPv4 addresses of [name] via DoH; first with the fixed server address, then via a normal lookup. */
@@ -64,7 +76,8 @@ object DohUtils {
         val target = if (pinned) InetSocketAddress(provider.dohIp, 443) else InetSocketAddress(provider.dohHost, 443)
         tls(target, provider.dohHost, timeoutMs).use { ssl ->
             val query = Base64.encodeToString(query(name), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
-            val request = "GET /dns-query?dns=$query HTTP/1.1\r\nHost: ${provider.dohHost}\r\n" +
+            val path = java.net.URI(provider.dohUrl).rawPath.ifEmpty { "/" }
+            val request = "GET $path?dns=$query HTTP/1.1\r\nHost: ${provider.dohHost}\r\n" +
                 "Accept: application/dns-message\r\nConnection: close\r\n\r\n"
             ssl.outputStream.write(request.toByteArray())
             ssl.outputStream.flush()
@@ -78,7 +91,7 @@ object DohUtils {
 
     /** Can [provider]'s DoT (Android Private DNS) be reached and does it answer? */
     fun dotWorks(provider: Provider, timeoutMs: Int): Boolean = try {
-        tls(InetSocketAddress(provider.dns1, 853), provider.dotHost, timeoutMs).use { ssl ->
+        tls(InetSocketAddress(provider.dotIp, 853), provider.dotHost, timeoutMs).use { ssl ->
             val q = query("example.com")
             ssl.outputStream.write(byteArrayOf((q.size shr 8).toByte(), q.size.toByte()) + q)
             ssl.outputStream.flush()

@@ -16,8 +16,9 @@ remembered per network (each Wi-Fi / mobile data), so next time only a quick che
 - **Windows** combines [GoodbyeDPI](https://github.com/ValdikSS/GoodbyeDPI), [zapret](https://github.com/bol-van/zapret) and the
   [Flowseal](https://github.com/Flowseal/zapret-discord-youtube) presets: 144 settings in 14 types (usually tested in 2-5 minutes), plain `.cmd`, portable. Source: [`windows/`](windows/).
 
-**Encrypted DNS:** before testing, both versions check Quad9, Cloudflare, Google, AdGuard, Yandex and OpenDNS
-over DNS-over-HTTPS and use the fastest working one for every test. Sites blocked only through DNS are detected
+**Encrypted DNS:** before testing, both versions check 16 DNS-over-HTTPS servers at once (Quad9, Cloudflare,
+Google, AdGuard, Yandex, OpenDNS, Control D, DNS4EU, DNS.SB, CIRA Shield, CleanBrowsing, Hurricane Electric,
+Digitale Gesellschaft, Switch, AliDNS, LibreDNS) and use the fastest working one for every test. Sites blocked only through DNS are detected
 separately, and browsing switches to the same DNS server (Android: VPN DNS + a Private DNS prompt if your provider
 fakes DNS answers; Windows: asks once, undone by `6_RESET_to_defaults.cmd`).
 

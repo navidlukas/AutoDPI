@@ -33,8 +33,10 @@ WHAT IT TESTS (app\strategies.txt - 144 settings, editable)
     real handshake (padencap, dupsid)
   The settings are grouped into 14 types (split, disorder, fake + badseq,
   fake + ts, ...). How a test runs:
-  0. Encrypted DNS first: Quad9, Cloudflare, Google, AdGuard, Yandex and
-     OpenDNS (DNS over HTTPS) are checked and the fastest working one is used
+  0. Encrypted DNS first: 16 DNS-over-HTTPS servers (Quad9, Cloudflare,
+     Google, AdGuard, Yandex, OpenDNS, Control D, DNS4EU, DNS.SB, CIRA,
+     CleanBrowsing, Hurricane Electric, Digitale Gesellschaft, Switch,
+     AliDNS, LibreDNS) are checked at once and the fastest one is used
      for every site test. Sites that only open with encrypted DNS are shown
      as DNS-BLOCKED - switching DNS fixes them, no DPI setting needed.
   1. One setting of each type is tried on the blocked sites.

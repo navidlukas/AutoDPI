@@ -394,14 +394,17 @@ class TestService : Service() {
 
         // 0. encrypted DNS: fastest working DoH server; every site test then uses its answers
         setPhase(5, 1, 1)
-        val provider = DohUtils.pickFastest(AUTO_DNS_TIMEOUT_MS)?.first
+        val ranked = DohUtils.rankBySpeed(AUTO_DNS_TIMEOUT_MS).map { it.first }
+        val provider = ranked.firstOrNull()
+        // browsing DNS needs a server that also answers plain DNS (the VPN sends it unencrypted)
+        val plainProvider = ranked.firstOrNull { it.dns1 != null }
         var dohAddresses: Map<String, String> = emptyMap()
         if (provider != null) {
             val hosts = sites.map { site -> runCatching { java.net.URL(siteUrl(site)).host }.getOrDefault(site) }
             dohAddresses = DohUtils.resolveAll(provider, hosts, AUTO_DNS_TIMEOUT_MS)
             dohResolver = { host -> dohAddresses[host] }
             // the VPN then uses this provider for browsing (Chrome upgrades it to encrypted DNS)
-            getPreferences().edit(commit = true) { putString("dns_ip", provider.dns1) }
+            plainProvider?.dns1?.let { ip -> getPreferences().edit(commit = true) { putString("dns_ip", ip) } }
             mutableState.value = state.value.copy(dnsProvider = provider.name)
         }
 
@@ -443,7 +446,7 @@ class TestService : Service() {
         val blocked = sites.filter { it !in okEncryptedDns }
         val screenOptions = options.copy(sites = blocked.ifEmpty { sites })
         mutableState.value = state.value.copy(blockedCount = blocked.size, dnsBlockedCount = dnsBlocked.size)
-        if (provider != null && dnsBlocked.isNotEmpty()) checkPrivateDnsNeeded(provider, dnsBlocked, dohAddresses)
+        if (plainProvider != null && dnsBlocked.isNotEmpty()) checkPrivateDnsNeeded(plainProvider, dnsBlocked, dohAddresses)
 
         // 3. screening, fastest first:
         //    A) the first setting of each type (split, disorder, fake + TTL, ...)
@@ -546,7 +549,7 @@ class TestService : Service() {
         if (PrivateDnsUtils.getState(this@TestService) is PrivateDnsState.Configured) return@withContext
         val site = dnsBlocked.first()
         val host = runCatching { java.net.URL(siteUrl(site)).host }.getOrDefault(site)
-        val plain = DohUtils.udp(provider.dns1, host, AUTO_DNS_TIMEOUT_MS)
+        val plain = DohUtils.udp(provider.dns1 ?: return@withContext, host, AUTO_DNS_TIMEOUT_MS)
         val tampered = plain.isNullOrEmpty() || plain.any { DohUtils.isBogus(it) } ||
             (dohAddresses[host] != null && plain.none { it == dohAddresses[host] } &&
                 DohUtils.doh(provider, host, AUTO_DNS_TIMEOUT_MS)?.intersect(plain.toSet())?.isEmpty() == true)
