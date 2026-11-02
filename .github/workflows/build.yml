@@ -1,0 +1,56 @@
+# AutoDPI: builds the APK on every push and publishes it as the "latest" release
+name: Build APK
+
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        run: sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/debug/*universal*.apk out/AutoDPI.apk
+          ls -la app/build/outputs/apk/debug/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoDPI-apk
+          path: out/AutoDPI.apk
+
+      - name: Publish as "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: AutoDPI latest build
+          body: Automatic build from the latest commit. Download AutoDPI.apk and install it on your phone.
+          prerelease: false
+          make_latest: true
+          files: out/AutoDPI.apk

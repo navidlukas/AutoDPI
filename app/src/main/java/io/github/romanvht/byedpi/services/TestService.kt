@@ -38,13 +38,18 @@ class TestService : Service() {
         private const val CHANNEL = "Proxy test"
         private const val RESULTS_FILE = "proxy_test_results.json"
         private const val NOTIFICATION_ID = 4
+        // AutoDPI
+        const val AUTO_WINNER_KEY = "autodpi_winner"
+        const val AUTO_SCORE_KEY = "autodpi_score"
+        private const val AUTO_FINALISTS = 10
+        private const val AUTO_ROUNDS = 3
         private val mutableState = MutableStateFlow(TestState())
         private val resultsLock = Any()
         val state: StateFlow<TestState> = mutableState.asStateFlow()
         val isRunning: Boolean
             get() = state.value.isRunning
 
-        fun start(context: Context) {
+        fun start(context: Context, auto: Boolean = false, forceFull: Boolean = false) {
             if (isRunning) return
             ServiceManager.refresh(context)
             val previous = state.value
@@ -55,6 +60,13 @@ class TestService : Service() {
                 currentStrategy = 0,
                 failed = false,
                 wasInterrupted = false,
+                auto = auto,
+                forceFull = forceFull,
+                phase = 0,
+                phaseProgress = 0,
+                phaseTotal = 0,
+                blockedCount = -1,
+                winner = null,
             )
             try {
                 ContextCompat.startForegroundService(context, Intent(context, TestService::class.java).setAction(START_ACTION))
@@ -67,6 +79,15 @@ class TestService : Service() {
         fun stop() {
             if (!isRunning) return
             mutableState.value = state.value.copy(isStopping = true)
+        }
+
+        /** AutoDPI: returns the winning command once after an auto run finished, then clears it. */
+        fun consumeWinner(): String? {
+            val current = state.value
+            if (current.isRunning) return null
+            val winner = current.winner ?: return null
+            mutableState.value = current.copy(winner = null)
+            return winner
         }
 
         suspend fun awaitStopped() {
@@ -162,6 +183,9 @@ class TestService : Service() {
         val previous = state.value.copy(isRunning = false, isStopping = false)
         testJob = scope.launch(start = CoroutineStart.LAZY) {
             val testingJob = coroutineContext.job
+            val auto = state.value.auto
+            val forceFull = state.value.forceFull
+            var winner: String? = null
             var settings: TestSettings? = null
             var currentStrategy: StrategyResult? = null
             var prepared = false
@@ -197,7 +221,9 @@ class TestService : Service() {
                     }
                 }
 
-                for ((index, strategy) in strategies.withIndex()) {
+                if (auto) {
+                    winner = runAuto(options, strategies, configurations, forceFull)
+                } else for ((index, strategy) in strategies.withIndex()) {
                     ensureActive()
                     currentStrategy = strategy
                     strategy.totalRequests = options.sites.size * options.requestsCount
@@ -247,6 +273,8 @@ class TestService : Service() {
                         isLoaded = true,
                         strategies = snapshot(strategies),
                         failed = failed,
+                        auto = auto,
+                        winner = winner,
                     ) else previous.copy(failed = failed)
                 }
             }
@@ -284,6 +312,11 @@ class TestService : Service() {
                                 strategy.siteResults.add(SiteResult(site, successCount, countRequests))
                                 publish(strategies)
                             }
+                        },
+                        onSiteTimed = { _, _, _, ms ->
+                            withContext(Dispatchers.Main.immediate) {
+                                strategy.successMs += ms
+                            }
                         }
                     )
                     true
@@ -305,6 +338,128 @@ class TestService : Service() {
             Toast.makeText(this, getString(R.string.failed_to_start, Sender.Proxy.name), Toast.LENGTH_SHORT).show()
             false
         }
+    }
+
+    /**
+     * AutoDPI "find best & connect":
+     * 1. quick check of the saved winner (skipped when forceFull)
+     * 2. baseline without bypass to find the blocked sites
+     * 3. every strategy on the blocked sites
+     * 4. top strategies AUTO_ROUNDS times on all sites; most reliable, then fastest, wins
+     * Returns the winning command (already applied to the settings) or null.
+     */
+    private suspend fun runAuto(
+        options: TestSettings,
+        strategies: MutableList<StrategyResult>,
+        configurations: List<Result<Configuration>>,
+        forceFull: Boolean,
+    ): String? {
+        val prefs = getPreferences()
+        val sites = options.sites
+
+        // 1. quick check of the saved winner
+        val saved = prefs.getString(AUTO_WINNER_KEY, null)
+        val savedScore = prefs.getInt(AUTO_SCORE_KEY, -1)
+        if (!forceFull && !saved.isNullOrBlank() && savedScore > 0) {
+            setPhase(1, 1, 1)
+            val configuration = withContext(Dispatchers.IO) {
+                runCatching { testConfiguration(this@TestService, saved, options.host, options.port) }.getOrNull()
+            }
+            if (configuration != null) {
+                val probe = StrategyResult(command = saved)
+                probe.totalRequests = sites.size * options.requestsCount
+                checkStrategy(probe, strategies, configuration, options)
+                stopEngine()
+                if (probe.successCount >= savedScore) {
+                    applyWinner(saved, savedScore)
+                    return saved
+                }
+            }
+        }
+
+        // 2. baseline: which sites are blocked without any bypass
+        setPhase(2, 1, 1)
+        val baseline = SiteCheckUtils(options.host, options.port, direct = true).checkSitesAsync(
+            sites = sites,
+            requestsCount = 1,
+            requestTimeout = options.requestTimeout,
+            concurrentRequests = options.requestLimit,
+            fullLog = false,
+        )
+        val blocked = baseline.filter { it.second == 0 }.map { it.first }
+        val screenOptions = options.copy(sites = blocked.ifEmpty { sites })
+        mutableState.value = state.value.copy(blockedCount = blocked.size)
+
+        // 3. screening: every strategy on the blocked sites
+        for ((index, strategy) in strategies.withIndex()) {
+            currentCoroutineContext().ensureActive()
+            setPhase(3, index + 1, strategies.size)
+            strategy.totalRequests = screenOptions.sites.size * options.requestsCount
+            publish(strategies, index + 1)
+            val configuration = configurations[index].getOrNull()
+            if (configuration == null || !checkStrategy(strategy, strategies, configuration, screenOptions)) {
+                resetStrategyResult(strategy, screenOptions)
+            }
+            strategy.isCompleted = true
+            publish(strategies)
+            stopEngine()
+            delay(options.delaySec * 500L)
+        }
+
+        // 4. final round: best strategies, several rounds, all sites
+        val finalists = strategies.withIndex()
+            .filter { it.value.successCount > 0 }
+            .sortedWith(compareByDescending<IndexedValue<StrategyResult>> { it.value.successCount }
+                .thenBy { it.value.avgMs })
+            .take(AUTO_FINALISTS)
+        if (finalists.isEmpty()) return null
+
+        for ((position, item) in finalists.withIndex()) {
+            val strategy = item.value
+            setPhase(4, position + 1, finalists.size)
+            strategy.successCount = 0
+            strategy.successMs = 0
+            strategy.currentProgress = 0
+            strategy.siteResults.clear()
+            strategy.totalRequests = sites.size * options.requestsCount * AUTO_ROUNDS
+            strategy.isCompleted = false
+            publish(strategies, item.index + 1)
+            val configuration = configurations[item.index].getOrNull()
+            if (configuration != null) {
+                repeat(AUTO_ROUNDS) {
+                    currentCoroutineContext().ensureActive()
+                    checkStrategy(strategy, strategies, configuration, options)
+                    stopEngine()
+                    delay(options.delaySec * 500L)
+                }
+            }
+            strategy.isCompleted = true
+            publish(strategies)
+        }
+
+        val ranked = finalists.map { it.value }
+            .sortedWith(compareByDescending<StrategyResult> { it.successCount }.thenBy { it.avgMs })
+        ranked.forEachIndexed { rank, strategy -> strategy.autoRank = rank + 1 }
+        publish(strategies)
+        val best = ranked.first()
+        if (best.successCount == 0) return null
+        applyWinner(best.command, best.successCount / AUTO_ROUNDS)
+        return best.command
+    }
+
+    /** AutoDPI: make the command the active strategy and remember it for the next quick check. */
+    private suspend fun applyWinner(command: String, score: Int) {
+        getPreferences().edit(commit = true) {
+            putString(AUTO_WINNER_KEY, command)
+            putInt(AUTO_SCORE_KEY, score)
+            putString("byedpi_cmd_args", command)
+            putBoolean("byedpi_enable_cmd_settings", true)
+        }
+        withContext(Dispatchers.IO) { HistoryUtils(this@TestService).addCommand(command) }
+    }
+
+    private fun setPhase(phase: Int, progress: Int, total: Int) {
+        mutableState.value = state.value.copy(phase = phase, phaseProgress = progress, phaseTotal = total)
     }
 
     private suspend fun startEngine(configuration: Configuration): NativeEngine {

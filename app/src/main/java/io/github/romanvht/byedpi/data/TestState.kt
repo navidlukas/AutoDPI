@@ -9,4 +9,12 @@ data class TestState(
     val strategies: List<StrategyResult> = emptyList(),
     val failed: Boolean = false,
     val wasInterrupted: Boolean = false,
+    // AutoDPI "find best & connect" mode
+    val auto: Boolean = false,
+    val forceFull: Boolean = false,
+    val phase: Int = 0,          // 0 idle, 1 quick check, 2 baseline, 3 screening, 4 final round
+    val phaseProgress: Int = 0,
+    val phaseTotal: Int = 0,
+    val blockedCount: Int = -1,
+    val winner: String? = null,  // command to apply and connect, consumed by the UI
 )

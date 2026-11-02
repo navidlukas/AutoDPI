@@ -58,3 +58,74 @@
 -d1 -s3+s -a1
 -o3 -d7 -a1
 -d7 -s2 -a1
+-d1
+-d1+s
+-d3+s
+-d1 -d3+s
+-s1 -d3+s
+-d1+sm
+-s1
+-s1+s
+-s1+sm
+-s1 -s3+s
+-o1
+-o1+s
+-o2+sm
+-q1+s
+-o1 -d3+s
+-r1+s
+-r1+sm
+-s1 -r1+s
+-d1 -r1+s
+-d1 -r1+s -s3+s
+-o1 -r1+s
+-d1 -Mh,d,r
+-d1+s -Mh,d,r
+-d3+s -Mh,d,r
+-d1 -d3+s -Mh,d,r
+-s1 -d3+s -Mh,d,r
+-d1+sm -Mh,d,r
+-s1 -Mh,d,r
+-s1+s -Mh,d,r
+-s1+sm -Mh,d,r
+-s1 -s3+s -Mh,d,r
+-o1 -Mh,d,r
+-o1+s -Mh,d,r
+-o2+sm -Mh,d,r
+-q1+s -Mh,d,r
+-o1 -d3+s -Mh,d,r
+-r1+s -Mh,d,r
+-r1+sm -Mh,d,r
+-s1 -r1+s -Mh,d,r
+-d1 -r1+s -Mh,d,r
+-d1 -r1+s -s3+s -Mh,d,r
+-o1 -r1+s -Mh,d,r
+-f-1 -t4
+-d1 -f-1 -t4
+-f1+s -t4
+-f1+sm -t4 -r1+s
+-f-1 -t6
+-d1 -f-1 -t6
+-f1+s -t6
+-f1+sm -t6 -r1+s
+-f-1 -t8
+-d1 -f-1 -t8
+-f1+s -t8
+-f1+sm -t8 -r1+s
+-f-1 -t10
+-d1 -f-1 -t10
+-f1+s -t10
+-f1+sm -t10 -r1+s
+-d1 -f-1 -t6 -r1+s
+-s1 -f1+s -t6 -r1+s
+-d1 -f-1 -t8 -r1+s
+-s1 -f1+s -t8 -r1+s
+-f-1 -t8 -n {sni} -Qr
+-d1 -f-1 -t8 -n {sni} -Qr
+-f1+s -t6 -n {sni} -Qr -r1+s
+-d1 -At,r,s -f-1 -t8
+-s1 -At,r,s -d1+s
+-r1+s -At,r,s -d1 -f-1 -t6
+-d1+s -At,r,s -o1+s
+-s1+sm -At,r,s -f1+s -t8 -r1+s
+-o1 -At,r,s -d3+s -r1+s

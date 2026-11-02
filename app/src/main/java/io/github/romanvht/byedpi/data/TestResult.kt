@@ -7,10 +7,17 @@ data class StrategyResult(
     var currentProgress: Int = 0,
     var isCompleted: Boolean = false,
     val siteResults: MutableList<SiteResult> = mutableListOf(),
-    var isExpanded: Boolean = false
+    var isExpanded: Boolean = false,
+    // AutoDPI: total ms of successful requests, for the speed ranking
+    var successMs: Long = 0,
+    // AutoDPI: 1 = winner, 2..n = final-round rank, 0 = not in the final round
+    var autoRank: Int = 0
 ) {
     val successPercentage: Int
         get() = if (totalRequests > 0) (successCount * 100) / totalRequests else 0
+
+    val avgMs: Long
+        get() = if (successCount > 0) successMs / successCount else 0
 }
 
 data class SiteResult(

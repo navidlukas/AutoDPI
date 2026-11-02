@@ -73,12 +73,12 @@ class StrategyResultAdapter(
 
             if (isProgress) {
                 holder.progressBar.isIndeterminate = true
-                holder.progressTextView.text = "${strategy.successCount}/${strategy.totalRequests}"
+                holder.progressTextView.text = progressLabel(strategy)
             } else {
                 holder.progressBar.isIndeterminate = false
                 holder.progressBar.max = strategy.totalRequests
                 holder.progressBar.progress = strategy.successCount
-                holder.progressTextView.text = "${strategy.successCount}/${strategy.totalRequests}"
+                holder.progressTextView.text = progressLabel(strategy)
             }
         } else {
             holder.progressLayout.visibility = View.GONE
@@ -122,12 +122,12 @@ class StrategyResultAdapter(
 
                 if (isProgress) {
                     holder.progressBar.isIndeterminate = true
-                    holder.progressTextView.text = "${strategy.successCount}/${strategy.totalRequests}"
+                    holder.progressTextView.text = progressLabel(strategy)
                 } else {
                     holder.progressBar.isIndeterminate = false
                     holder.progressBar.max = strategy.totalRequests
                     holder.progressBar.progress = strategy.successCount
-                    holder.progressTextView.text = "${strategy.successCount}/${strategy.totalRequests}"
+                    holder.progressTextView.text = progressLabel(strategy)
                 }
             }
 
@@ -165,6 +165,7 @@ class StrategyResultAdapter(
         strategies.clear()
 
         val sorted = newStrategies.sortedWith(compareByDescending<StrategyResult> { it.isCompleted }
+            .thenBy { if (it.autoRank > 0) it.autoRank else Int.MAX_VALUE }
             .thenByDescending { it.successPercentage }
             .thenByDescending { it.successCount })
 
@@ -187,5 +188,13 @@ class StrategyResultAdapter(
                 }
             }
             .show()
+    }
+
+    // AutoDPI: "ok/total", average load time, and a star for the winner
+    private fun progressLabel(strategy: StrategyResult): String {
+        val base = "${strategy.successCount}/${strategy.totalRequests}"
+        val speed = if (strategy.avgMs > 0) "  ${strategy.avgMs} ms" else ""
+        val star = if (strategy.autoRank == 1) "  \u2605" else ""
+        return base + speed + star
     }
 }

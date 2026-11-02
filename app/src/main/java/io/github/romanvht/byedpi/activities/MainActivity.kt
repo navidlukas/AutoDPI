@@ -216,6 +216,14 @@ class MainActivity : BaseActivity() {
             startActivity(intent)
         }
 
+        // AutoDPI: tap = check saved setting / find best and connect, hold = full re-test
+        binding.autoButton.setOnClickListener { startAuto(forceFull = false) }
+        binding.autoButton.setOnLongClickListener {
+            Toast.makeText(this, R.string.autodpi_retest, Toast.LENGTH_SHORT).show()
+            startAuto(forceFull = true)
+            true
+        }
+
         binding.testProxyButton.setOnClickListener {
             startActivity(Intent(this, TestActivity::class.java))
         }
@@ -249,6 +257,18 @@ class MainActivity : BaseActivity() {
         ServiceManager.refresh(this)
         updateStatus()
         updateStrategyButton()
+        // AutoDPI: an auto run finished while the test screen was closed
+        if (TestService.consumeWinner() != null) {
+            if (appStatus.first == AppStatus.Running) ServiceManager.restart(this, getPreferences().mode())
+            else start()
+        }
+    }
+
+    private fun startAuto(forceFull: Boolean) {
+        if (!TestService.isRunning) {
+            TestService.start(this, auto = true, forceFull = forceFull)
+        }
+        startActivity(Intent(this, TestActivity::class.java))
     }
 
     override fun onDestroy() {

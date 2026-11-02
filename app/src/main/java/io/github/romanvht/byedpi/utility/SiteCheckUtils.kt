@@ -18,7 +18,9 @@ import kotlin.coroutines.coroutineContext
 
 class SiteCheckUtils(
     private val proxyIp: String,
-    private val proxyPort: Int
+    private val proxyPort: Int,
+    // AutoDPI: true = connect directly (no proxy), used for the "without bypass" baseline
+    private val direct: Boolean = false
 ) {
 
     suspend fun checkSitesAsync(
@@ -27,18 +29,21 @@ class SiteCheckUtils(
         requestTimeout: Long,
         concurrentRequests: Int = 20,
         fullLog: Boolean,
-        onSiteChecked: (suspend (String, Int, Int) -> Unit)? = null
+        onSiteChecked: (suspend (String, Int, Int) -> Unit)? = null,
+        // AutoDPI: site, successes, requests, total ms of the successful requests
+        onSiteTimed: (suspend (String, Int, Int, Long) -> Unit)? = null
     ): List<Pair<String, Int>> {
         val semaphore = Semaphore(concurrentRequests)
         return withContext(Dispatchers.IO) {
             sites.map { site ->
                 async {
                     semaphore.withPermit {
-                        val successCount = checkSiteAccess(site, requestsCount, requestTimeout)
+                        val (successCount, successMs) = checkSiteAccess(site, requestsCount, requestTimeout)
                         coroutineContext.ensureActive()
                         if (fullLog) {
                             onSiteChecked?.invoke(site, successCount, requestsCount)
                         }
+                        onSiteTimed?.invoke(site, successCount, requestsCount, successMs)
                         site to successCount
                     }
                 }
@@ -50,8 +55,9 @@ class SiteCheckUtils(
         site: String,
         requestsCount: Int,
         timeout: Long
-    ): Int = withContext(Dispatchers.IO) {
+    ): Pair<Int, Long> = withContext(Dispatchers.IO) {
         var responseCount = 0
+        var successMs = 0L
 
         val formattedUrl = if (site.startsWith("http://") || site.startsWith("https://")) site
         else "https://$site"
@@ -60,16 +66,17 @@ class SiteCheckUtils(
             URL(formattedUrl)
         } catch (_: Exception) {
             Log.e("SiteChecker", "Invalid URL: $formattedUrl")
-            return@withContext 0
+            return@withContext 0 to 0L
         }
 
-        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(proxyIp, proxyPort))
+        val proxy = if (direct) Proxy.NO_PROXY else Proxy(Proxy.Type.SOCKS, InetSocketAddress(proxyIp, proxyPort))
 
         repeat(requestsCount) { attempt ->
             coroutineContext.ensureActive()
             Log.i("SiteChecker", "Attempt ${attempt + 1}/$requestsCount for $site")
 
             var connection: HttpURLConnection? = null
+            val startedAt = System.currentTimeMillis()
             try {
                 connection = url.openConnection(proxy) as HttpURLConnection
                 connection.connectTimeout = (timeout * 1000).toInt()
@@ -109,6 +116,7 @@ class SiteCheckUtils(
                 if (declaredLength <= 0L || actualLength >= declaredLength) {
                     Log.i("SiteChecker", "Response for $site: $responseCode, Declared: $declaredLength, Actual: $actualLength")
                     responseCount++
+                    successMs += System.currentTimeMillis() - startedAt
                 } else {
                     Log.w("SiteChecker", "Block detected for $site, Declared: $declaredLength, Actual: $actualLength")
                 }
@@ -122,6 +130,6 @@ class SiteCheckUtils(
             }
         }
 
-        responseCount
+        responseCount to successMs
     }
 }

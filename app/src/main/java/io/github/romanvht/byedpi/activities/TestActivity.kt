@@ -11,6 +11,7 @@ import android.view.WindowManager
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -47,6 +48,17 @@ class TestActivity : BaseActivity() {
     private var renderedRunId = -1L
     private val isTesting: Boolean get() = TestService.isRunning
     private val prefs by lazy { getPreferences() }
+
+    // AutoDPI: VPN permission prompt before connecting with the winner
+    private val vpnRegister =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (it.resultCode == RESULT_OK) {
+                ServiceManager.start(this, Mode.VPN)
+                Toast.makeText(this, R.string.autodpi_connected, Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this, R.string.vpn_permission_denied, Toast.LENGTH_SHORT).show()
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -144,6 +156,9 @@ class TestActivity : BaseActivity() {
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         progressTextView.text = when {
+            state.isRunning && state.auto -> autoProgressText(state)
+            !state.isRunning && state.auto && state.strategies.any { it.isCompleted } &&
+                state.strategies.none { it.autoRank > 0 } -> getString(R.string.autodpi_none)
             state.isRunning && state.currentStrategy > 0 -> getString(R.string.test_process, state.currentStrategy, state.strategies.size)
             state.isRunning -> ""
             state.failed || state.wasInterrupted -> getString(R.string.test_proxy_error)
@@ -175,6 +190,34 @@ class TestActivity : BaseActivity() {
             }
         }
         if (reorder) strategyAdapter.updateStrategies(strategies)
+
+        if (!state.isRunning && state.auto && state.winner != null) {
+            TestService.consumeWinner()?.let { connectWinner() }
+        }
+    }
+
+    private fun autoProgressText(state: TestState): String = when (state.phase) {
+        1 -> getString(R.string.autodpi_phase_quick)
+        2 -> getString(R.string.autodpi_phase_baseline)
+        3 -> getString(R.string.autodpi_phase_screen, state.phaseProgress, state.phaseTotal,
+            if (state.blockedCount > 0) state.blockedCount else 0)
+        4 -> getString(R.string.autodpi_phase_final, state.phaseProgress, state.phaseTotal)
+        else -> ""
+    }
+
+    /** AutoDPI: the winner is already saved as the active strategy - start (or restart) the service. */
+    private fun connectWinner() {
+        val mode = prefs.mode()
+        if (mode == Mode.VPN) {
+            val intent = VpnService.prepare(this)
+            if (intent != null) {
+                vpnRegister.launch(intent)
+                return
+            }
+        }
+        if (appStatus.first == AppStatus.Running) ServiceManager.restart(this, mode)
+        else ServiceManager.start(this, mode)
+        Toast.makeText(this, R.string.autodpi_connected, Toast.LENGTH_LONG).show()
     }
 
     private fun addToHistory(command: String) {

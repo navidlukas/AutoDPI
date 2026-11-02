@@ -1,6 +1,6 @@
 <resources>
     <string name="byedpi_docs">https://github.com/hufrea/byedpi/blob/main/README.md</string>
-    <string name="app_name">ByeByeDPI</string>
+    <string name="app_name">AutoDPI</string>
     <string name="cmd_documentation">Документация ByeDPI</string>
     <string name="toggle_connect">Вкл/Выкл</string>
     <string name="vpn_connect">Подключить</string>
@@ -242,4 +242,14 @@
     <string name="file_picker_unavailable">На устройстве отсутствует системный выбор файлов. Для продолжения предоставьте приложению доступ к файлам.</string>
     <string name="grant_access">Предоставить доступ</string>
     <string name="storage_access_not_granted">Доступ к файлам не предоставлен</string>
+
+    <!-- AutoDPI -->
+    <string name="autodpi_find_best">Find best &amp; connect</string>
+    <string name="autodpi_retest">Running all tests again</string>
+    <string name="autodpi_phase_quick">Checking the saved setting...</string>
+    <string name="autodpi_phase_baseline">Step 1/3: finding blocked sites...</string>
+    <string name="autodpi_phase_screen">Step 2/3: testing settings %1$d/%2$d on %3$d blocked sites</string>
+    <string name="autodpi_phase_final">Step 3/3: final round %1$d/%2$d</string>
+    <string name="autodpi_connected">Best setting applied and connected</string>
+    <string name="autodpi_none">No setting could open the blocked sites</string>
 </resources>
