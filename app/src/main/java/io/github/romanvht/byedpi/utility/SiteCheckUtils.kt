@@ -20,7 +20,9 @@ class SiteCheckUtils(
     private val proxyIp: String,
     private val proxyPort: Int,
     // AutoDPI: true = connect directly (no proxy), used for the "without bypass" baseline
-    private val direct: Boolean = false
+    private val direct: Boolean = false,
+    // AutoDPI: read at most this much of each page (16 KB is enough to know the site opened)
+    private val maxBytes: Long = 1024L * 1024
 ) {
 
     suspend fun checkSitesAsync(
@@ -98,7 +100,7 @@ class SiteCheckUtils(
                         val buffer = ByteArray(8192)
                         var bytesRead: Int
 
-                        val limit = if (declaredLength > 0) declaredLength else 1024L * 1024
+                        val limit = if (declaredLength > 0) minOf(declaredLength, maxBytes) else maxBytes
 
                         while (actualLength < limit) {
                             coroutineContext.ensureActive()
@@ -113,7 +115,7 @@ class SiteCheckUtils(
                     // Stream reading failed
                 }
 
-                if (declaredLength <= 0L || actualLength >= declaredLength) {
+                if (declaredLength <= 0L || actualLength >= minOf(declaredLength, maxBytes)) {
                     Log.i("SiteChecker", "Response for $site: $responseCode, Declared: $declaredLength, Actual: $actualLength")
                     responseCount++
                     successMs += System.currentTimeMillis() - startedAt

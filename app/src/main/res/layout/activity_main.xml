@@ -36,6 +36,7 @@
 
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/editor_button"
+                android:visibility="gone"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -123,6 +124,7 @@
 
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/test_proxy_button"
+                android:visibility="gone"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"

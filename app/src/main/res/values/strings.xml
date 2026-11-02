@@ -248,7 +248,7 @@
     <string name="autodpi_retest">Running all tests again</string>
     <string name="autodpi_phase_quick">Checking the saved setting...</string>
     <string name="autodpi_phase_baseline">Step 1/3: finding blocked sites...</string>
-    <string name="autodpi_phase_screen">Step 2/3: testing settings %1$d/%2$d on %3$d blocked sites</string>
+    <string name="autodpi_phase_screen">Step 2/3: setting %1$d (of up to %2$d) on %3$d blocked sites</string>
     <string name="autodpi_phase_final">Step 3/3: final round %1$d/%2$d</string>
     <string name="autodpi_connected">Best setting applied and connected</string>
     <string name="autodpi_none">No setting could open the blocked sites</string>

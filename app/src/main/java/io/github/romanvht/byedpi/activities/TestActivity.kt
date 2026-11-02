@@ -93,7 +93,8 @@ class TestActivity : BaseActivity() {
         startStopButton.setOnClickListener {
             startStopButton.isClickable = false
 
-            if (isTesting) TestService.stop() else TestService.start(this)
+            // AutoDPI: this screen only runs the automatic test
+            if (isTesting) TestService.stop() else TestService.start(this, auto = true, forceFull = true)
 
             startStopButton.postDelayed({ startStopButton.isClickable = true }, 1000)
         }

@@ -39,8 +39,11 @@ class TestService : Service() {
         private const val RESULTS_FILE = "proxy_test_results.json"
         private const val NOTIFICATION_ID = 4
         // AutoDPI
-        private const val AUTO_FINALISTS = 10
+        private const val AUTO_FINALISTS = 5
         private const val AUTO_ROUNDS = 3
+        private const val AUTO_STOP_AFTER = 3          // stop screening once this many settings open every blocked site
+        private const val AUTO_QUICK_TIMEOUT = 3L      // seconds per site while screening
+        private const val AUTO_QUICK_BYTES = 16L * 1024 // read only the start of each page
         private val mutableState = MutableStateFlow(TestState())
         private val resultsLock = Any()
         val state: StateFlow<TestState> = mutableState.asStateFlow()
@@ -292,6 +295,8 @@ class TestService : Service() {
         strategies: List<StrategyResult>,
         configuration: Configuration,
         settings: TestSettings,
+        quick: Boolean = false,          // AutoDPI: read only the start of each page
+        failFastFirst: Boolean = false,  // AutoDPI: stop if the first site does not open
     ): Boolean {
         return try {
             val current = startEngine(configuration)
@@ -304,8 +309,13 @@ class TestService : Service() {
                         "::", "[::]" -> "::1"
                         else -> configuration.host
                     }
-                    SiteCheckUtils(host, configuration.port).checkSitesAsync(
-                        sites = settings.sites,
+                    val checker = SiteCheckUtils(host, configuration.port,
+                        maxBytes = if (quick) AUTO_QUICK_BYTES else 1024L * 1024)
+                    val batches = if (failFastFirst && settings.sites.size > 1)
+                        listOf(settings.sites.take(1), settings.sites.drop(1)) else listOf(settings.sites)
+                    for (batch in batches) {
+                    checker.checkSitesAsync(
+                        sites = batch,
                         requestsCount = settings.requestsCount,
                         requestTimeout = settings.requestTimeout,
                         concurrentRequests = settings.requestLimit,
@@ -324,6 +334,8 @@ class TestService : Service() {
                             }
                         }
                     )
+                    if (failFastFirst && strategy.successCount == 0) break
+                    }
                     true
                 }
                 try {
@@ -374,7 +386,7 @@ class TestService : Service() {
             if (configuration != null) {
                 val probe = StrategyResult(command = saved)
                 probe.totalRequests = sites.size * options.requestsCount
-                checkStrategy(probe, strategies, configuration, options)
+                checkStrategy(probe, strategies, configuration, options, quick = true)
                 stopEngine()
                 if (probe.successCount >= savedScore) {
                     applyWinner(saved, savedScore, networkKey)
@@ -385,7 +397,8 @@ class TestService : Service() {
 
         // 2. baseline: which sites are blocked without any bypass
         setPhase(2, 1, 1)
-        val baseline = SiteCheckUtils(options.host, options.port, direct = true).checkSitesAsync(
+        val baseline = SiteCheckUtils(options.host, options.port, direct = true,
+            maxBytes = AUTO_QUICK_BYTES).checkSitesAsync(
             sites = sites,
             requestsCount = 1,
             requestTimeout = options.requestTimeout,
@@ -396,29 +409,56 @@ class TestService : Service() {
         val screenOptions = options.copy(sites = blocked.ifEmpty { sites })
         mutableState.value = state.value.copy(blockedCount = blocked.size)
 
-        // 3. screening: every strategy on the blocked sites
-        for ((index, strategy) in strategies.withIndex()) {
+        // 3. screening, fastest first:
+        //    A) the first setting of each type (split, disorder, fake + TTL, ...)
+        //    B) the other settings of the types that worked, best type first
+        //    C) if no type worked at all: everything else
+        //    Each setting stops at the first blocked site that does not open, and the
+        //    screening stops once AUTO_STOP_AFTER settings open every blocked site.
+        val quickOptions = screenOptions.copy(requestTimeout = AUTO_QUICK_TIMEOUT)
+        val perfectScore = screenOptions.sites.size * options.requestsCount
+        val tested = mutableListOf<Int>()
+        var perfect = 0
+
+        suspend fun screen(index: Int) {
             currentCoroutineContext().ensureActive()
-            setPhase(3, index + 1, strategies.size)
-            strategy.totalRequests = screenOptions.sites.size * options.requestsCount
+            val strategy = strategies[index]
+            tested.add(index)
+            setPhase(3, tested.size, strategies.size)
+            strategy.totalRequests = perfectScore
             publish(strategies, index + 1)
             val configuration = configurations[index].getOrNull()
-            if (configuration == null || !checkStrategy(strategy, strategies, configuration, screenOptions)) {
-                resetStrategyResult(strategy, screenOptions)
+            if (configuration == null || !checkStrategy(strategy, strategies, configuration, quickOptions,
+                    quick = true, failFastFirst = true)) {
+                resetStrategyResult(strategy, quickOptions)
             }
+            if (strategy.successCount >= perfectScore) perfect++
             strategy.isCompleted = true
             publish(strategies)
             stopEngine()
             delay(options.delaySec * 500L)
         }
 
-        // 4. final round: best strategies, several rounds, all sites
-        val finalists = strategies.withIndex()
-            .filter { it.value.successCount > 0 }
-            .sortedWith(compareByDescending<IndexedValue<StrategyResult>> { it.value.successCount }
-                .thenBy { it.value.avgMs })
+        val types = strategies.indices.groupBy { strategyType(strategies[it].command) }.values
+        for (members in types) screen(members.first())
+        val working = types.filter { strategies[it.first()].successCount > 0 }
+            .sortedByDescending { strategies[it.first()].successCount }
+        val rest = (if (working.isEmpty()) types else working).flatMap { it.drop(1) }
+        for (index in rest) {
+            if (perfect >= AUTO_STOP_AFTER) break
+            screen(index)
+        }
+
+        // 4. final round: best screened settings, several rounds, all sites
+        val finalists = tested
+            .filter { strategies[it].successCount > 0 }
+            .sortedWith(compareByDescending<Int> { strategies[it].successCount }.thenBy { strategies[it].avgMs })
             .take(AUTO_FINALISTS)
-        if (finalists.isEmpty()) return null
+            .map { IndexedValue(it, strategies[it]) }
+        if (finalists.isEmpty()) {
+            keepOnly(strategies, tested)
+            return null
+        }
 
         for ((position, item) in finalists.withIndex()) {
             val strategy = item.value
@@ -434,7 +474,7 @@ class TestService : Service() {
             if (configuration != null) {
                 repeat(AUTO_ROUNDS) {
                     currentCoroutineContext().ensureActive()
-                    checkStrategy(strategy, strategies, configuration, options)
+                    checkStrategy(strategy, strategies, configuration, options, quick = true)
                     stopEngine()
                     delay(options.delaySec * 500L)
                 }
@@ -446,6 +486,7 @@ class TestService : Service() {
         val ranked = finalists.map { it.value }
             .sortedWith(compareByDescending<StrategyResult> { it.successCount }.thenBy { it.avgMs })
         ranked.forEachIndexed { rank, strategy -> strategy.autoRank = rank + 1 }
+        keepOnly(strategies, tested)
         publish(strategies)
         val best = ranked.first()
         if (best.successCount == 0) return null
@@ -453,7 +494,30 @@ class TestService : Service() {
         return best.command
     }
 
+    /** AutoDPI: groups similar ByeDPI commands, so one of each type can be tried first. */
+    private fun strategyType(command: String): String {
+        val tokens = command.split(Regex("\\s+"))
+        fun has(vararg prefixes: String) = tokens.any { token -> prefixes.any { token.startsWith(it) } }
+        val base = when {
+            has("-f") && has("-Q", "-n") -> "fake-mod"
+            has("-f") && has("-t") -> "fake-ttl"
+            has("-f") -> "fake"
+            has("-o", "-q") -> "oob"
+            has("-r") -> "tlsrec"
+            has("-d") -> "disorder"
+            else -> "split"
+        }
+        return if (has("-A")) "$base+auto" else base
+    }
+
+    /** AutoDPI: after an auto run, show only the settings that were actually tested. */
+    private fun keepOnly(strategies: MutableList<StrategyResult>, tested: List<Int>) {
+        val keep = tested.map { strategies[it] }.toSet()
+        strategies.retainAll { it in keep }
+    }
+
     /** AutoDPI: make the command the active strategy and remember it for this network. */
+
     private suspend fun applyWinner(command: String, score: Int, networkKey: String) {
         NetworkKeyUtils.saveWinner(getPreferences(), networkKey, command, score)
         withContext(Dispatchers.IO) { HistoryUtils(this@TestService).addCommand(command) }
