@@ -13,7 +13,11 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.net.Socket
 import java.net.URL
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 import kotlin.coroutines.coroutineContext
 
 class SiteCheckUtils(
@@ -22,7 +26,9 @@ class SiteCheckUtils(
     // AutoDPI: true = connect directly (no proxy), used for the "without bypass" baseline
     private val direct: Boolean = false,
     // AutoDPI: read at most this much of each page (16 KB is enough to know the site opened)
-    private val maxBytes: Long = 1024L * 1024
+    private val maxBytes: Long = 1024L * 1024,
+    // AutoDPI: site address from encrypted DNS (host -> IPv4); null = normal DNS lookup
+    private val resolver: ((String) -> String?)? = null
 ) {
 
     suspend fun checkSitesAsync(
@@ -76,6 +82,17 @@ class SiteCheckUtils(
         repeat(requestsCount) { attempt ->
             coroutineContext.ensureActive()
             Log.i("SiteChecker", "Attempt ${attempt + 1}/$requestsCount for $site")
+
+            // AutoDPI: with encrypted DNS, connect to the DoH address and do TLS under the real name
+            val pinnedIp = if (url.protocol == "https") resolver?.invoke(url.host) else null
+            if (pinnedIp != null) {
+                val started = System.currentTimeMillis()
+                if (rawHttpsOk(url, pinnedIp, proxy, (timeout * 1000).toInt())) {
+                    responseCount++
+                    successMs += System.currentTimeMillis() - started
+                }
+                return@repeat
+            }
 
             var connection: HttpURLConnection? = null
             val startedAt = System.currentTimeMillis()
@@ -133,5 +150,40 @@ class SiteCheckUtils(
         }
 
         responseCount to successMs
+    }
+
+    /**
+     * AutoDPI: HTTPS request to a fixed address (from encrypted DNS) through [proxy].
+     * Success = valid certificate for the site + an HTTP answer below 500 + the start of the
+     * page (up to maxBytes) arriving in full.
+     */
+    private fun rawHttpsOk(url: URL, ip: String, proxy: Proxy, timeoutMs: Int): Boolean = try {
+        val host = url.host
+        val port = if (url.port > 0) url.port else 443
+        val plain = Socket(proxy)
+        plain.soTimeout = timeoutMs
+        plain.connect(InetSocketAddress(ip, port), timeoutMs)
+        (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(plain, host, port, true).use { socket ->
+            val ssl = socket as SSLSocket
+            ssl.soTimeout = timeoutMs
+            ssl.startHandshake()
+            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, ssl.session)) {
+                Log.w("SiteChecker", "Certificate mismatch for $host at $ip")
+                false
+            } else {
+                val path = url.path.ifEmpty { "/" } + (url.query?.let { "?$it" } ?: "")
+                val request = "GET $path HTTP/1.1\r\nHost: $host\r\n" +
+                    "User-Agent: Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36\r\n" +
+                    "Accept: text/html,*/*\r\nConnection: close\r\n\r\n"
+                ssl.outputStream.write(request.toByteArray())
+                ssl.outputStream.flush()
+                val response = DohUtils.readHttp(ssl.inputStream, maxBytes.toInt())
+                Log.i("SiteChecker", "Response for $host via $ip: ${response.status}, complete: ${response.complete}")
+                response.status in 100..499 && response.complete
+            }
+        }
+    } catch (e: Exception) {
+        Log.e("SiteChecker", "Error accessing ${url.host} via $ip: ${e.message}")
+        false
     }
 }

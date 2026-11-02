@@ -44,6 +44,7 @@ class TestService : Service() {
         private const val AUTO_STOP_AFTER = 3          // stop screening once this many settings open every blocked site
         private const val AUTO_QUICK_TIMEOUT = 3L      // seconds per site while screening
         private const val AUTO_QUICK_BYTES = 16L * 1024 // read only the start of each page
+        private const val AUTO_DNS_TIMEOUT_MS = 3000
         private val mutableState = MutableStateFlow(TestState())
         private val resultsLock = Any()
         val state: StateFlow<TestState> = mutableState.asStateFlow()
@@ -80,6 +81,15 @@ class TestService : Service() {
         fun stop() {
             if (!isRunning) return
             mutableState.value = state.value.copy(isStopping = true)
+        }
+
+        /** AutoDPI: returns the Private DNS suggestion once, then clears it. */
+        fun consumePrivateDnsHint(): String? {
+            val current = state.value
+            if (current.isRunning) return null
+            val hint = current.privateDnsHint ?: return null
+            mutableState.value = current.copy(privateDnsHint = null)
+            return hint
         }
 
         /** AutoDPI: used by "reset app" - deletes saved test results. */
@@ -135,6 +145,8 @@ class TestService : Service() {
     private val gson = Gson()
     private val engineMutex = Mutex()
     private var engine: NativeEngine? = null
+    // AutoDPI: site addresses from encrypted DNS during an auto run (host -> IPv4)
+    private var dohResolver: ((String) -> String?)? = null
     private var testJob: Job? = null
     private var lastStartId = 0
     private var destroyed = false
@@ -255,6 +267,8 @@ class TestService : Service() {
             } finally {
                 stopWatcher.cancel()
                 withContext(NonCancellable) {
+                    dohResolver = null
+                    val dnsInfo = state.value
                     mutableState.value = state.value.copy(isStopping = true)
                     settings?.let { options ->
                         currentStrategy?.takeIf { !it.isCompleted }?.let {
@@ -283,6 +297,9 @@ class TestService : Service() {
                         failed = failed,
                         auto = auto,
                         winner = winner,
+                        dnsProvider = dnsInfo.dnsProvider,
+                        dnsBlockedCount = dnsInfo.dnsBlockedCount,
+                        privateDnsHint = dnsInfo.privateDnsHint,
                     ) else previous.copy(failed = failed)
                 }
             }
@@ -310,7 +327,7 @@ class TestService : Service() {
                         else -> configuration.host
                     }
                     val checker = SiteCheckUtils(host, configuration.port,
-                        maxBytes = if (quick) AUTO_QUICK_BYTES else 1024L * 1024)
+                        maxBytes = if (quick) AUTO_QUICK_BYTES else 1024L * 1024, resolver = dohResolver)
                     val batches = if (failFastFirst && settings.sites.size > 1)
                         listOf(settings.sites.take(1), settings.sites.drop(1)) else listOf(settings.sites)
                     for (batch in batches) {
@@ -375,6 +392,19 @@ class TestService : Service() {
         // the winner is remembered per network (home Wi-Fi, mobile data, ...)
         val networkKey = NetworkKeyUtils.currentKey(this)
 
+        // 0. encrypted DNS: fastest working DoH server; every site test then uses its answers
+        setPhase(5, 1, 1)
+        val provider = DohUtils.pickFastest(AUTO_DNS_TIMEOUT_MS)?.first
+        var dohAddresses: Map<String, String> = emptyMap()
+        if (provider != null) {
+            val hosts = sites.map { site -> runCatching { java.net.URL(siteUrl(site)).host }.getOrDefault(site) }
+            dohAddresses = DohUtils.resolveAll(provider, hosts, AUTO_DNS_TIMEOUT_MS)
+            dohResolver = { host -> dohAddresses[host] }
+            // the VPN then uses this provider for browsing (Chrome upgrades it to encrypted DNS)
+            getPreferences().edit(commit = true) { putString("dns_ip", provider.dns1) }
+            mutableState.value = state.value.copy(dnsProvider = provider.name)
+        }
+
         // 1. quick check of this network's saved winner
         val savedWinner = NetworkKeyUtils.savedWinner(getPreferences(), networkKey)
         if (!forceFull && savedWinner != null) {
@@ -395,19 +425,25 @@ class TestService : Service() {
             }
         }
 
-        // 2. baseline: which sites are blocked without any bypass
+        // 2. baseline without any bypass: first with normal DNS, then with encrypted DNS.
+        //    Sites that only open with encrypted DNS are DNS-blocked (no DPI setting needed).
         setPhase(2, 1, 1)
-        val baseline = SiteCheckUtils(options.host, options.port, direct = true,
-            maxBytes = AUTO_QUICK_BYTES).checkSitesAsync(
-            sites = sites,
-            requestsCount = 1,
-            requestTimeout = options.requestTimeout,
-            concurrentRequests = options.requestLimit,
-            fullLog = false,
-        )
-        val blocked = baseline.filter { it.second == 0 }.map { it.first }
+        suspend fun baselineOk(resolver: ((String) -> String?)?): Set<String> =
+            SiteCheckUtils(options.host, options.port, direct = true, maxBytes = AUTO_QUICK_BYTES, resolver = resolver)
+                .checkSitesAsync(
+                    sites = sites,
+                    requestsCount = 1,
+                    requestTimeout = options.requestTimeout,
+                    concurrentRequests = options.requestLimit,
+                    fullLog = false,
+                ).filter { it.second > 0 }.map { it.first }.toSet()
+        val okNormalDns = baselineOk(null)
+        val okEncryptedDns = if (provider != null) baselineOk(dohResolver) else okNormalDns
+        val dnsBlocked = okEncryptedDns - okNormalDns
+        val blocked = sites.filter { it !in okEncryptedDns }
         val screenOptions = options.copy(sites = blocked.ifEmpty { sites })
-        mutableState.value = state.value.copy(blockedCount = blocked.size)
+        mutableState.value = state.value.copy(blockedCount = blocked.size, dnsBlockedCount = dnsBlocked.size)
+        if (provider != null && dnsBlocked.isNotEmpty()) checkPrivateDnsNeeded(provider, dnsBlocked, dohAddresses)
 
         // 3. screening, fastest first:
         //    A) the first setting of each type (split, disorder, fake + TTL, ...)
@@ -492,6 +528,32 @@ class TestService : Service() {
         if (best.successCount == 0) return null
         applyWinner(best.command, best.successCount / AUTO_ROUNDS, networkKey)
         return best.command
+    }
+
+    private fun siteUrl(site: String) =
+        if (site.startsWith("http://") || site.startsWith("https://")) site else "https://$site"
+
+    /**
+     * AutoDPI: DNS-blocked sites open with encrypted DNS. The VPN sends DNS to the provider
+     * unencrypted, which only helps if the internet provider does not also fake those answers.
+     * If it does (and Private DNS is off), suggest Private DNS (DoT) with a server that works here.
+     */
+    private suspend fun checkPrivateDnsNeeded(
+        provider: DohUtils.Provider,
+        dnsBlocked: Set<String>,
+        dohAddresses: Map<String, String>,
+    ) = withContext(Dispatchers.IO) {
+        if (PrivateDnsUtils.getState(this@TestService) is PrivateDnsState.Configured) return@withContext
+        val site = dnsBlocked.first()
+        val host = runCatching { java.net.URL(siteUrl(site)).host }.getOrDefault(site)
+        val plain = DohUtils.udp(provider.dns1, host, AUTO_DNS_TIMEOUT_MS)
+        val tampered = plain.isNullOrEmpty() || plain.any { DohUtils.isBogus(it) } ||
+            (dohAddresses[host] != null && plain.none { it == dohAddresses[host] } &&
+                DohUtils.doh(provider, host, AUTO_DNS_TIMEOUT_MS)?.intersect(plain.toSet())?.isEmpty() == true)
+        if (!tampered) return@withContext
+        val dot = (listOf(provider) + DohUtils.providers.filter { it != provider })
+            .firstOrNull { DohUtils.dotWorks(it, AUTO_DNS_TIMEOUT_MS) } ?: return@withContext
+        mutableState.value = state.value.copy(privateDnsHint = dot.dotHost)
     }
 
     /** AutoDPI: groups similar ByeDPI commands, so one of each type can be tried first. */

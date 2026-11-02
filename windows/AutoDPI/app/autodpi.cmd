@@ -84,6 +84,9 @@ rem the best setting is remembered separately for each network
 call :get_network
 echo Network: !NETNAME!
 echo.
+rem find the fastest working encrypted DNS (DoH) server; all site tests then use it
+call :dns_check
+echo.
 set "NBEST=%NETDIR%%NETID%_setting.txt"
 set "NSCORE=%NETDIR%%NETID%_score.txt"
 if not exist "%NETDIR%" (
@@ -128,6 +131,7 @@ goto :full_test
 
 :quick_go
 call :start_final !SE! SA SN
+call :offer_dns
 echo.
 echo AutoDPI is running in a minimised window. Close that window to stop it.
 goto :finish
@@ -140,8 +144,15 @@ netsh interface tcp set global timestamps=enabled >nul 2>&1
 > "%LOG%" echo AutoDPI test log - started %date% %time%
 
 echo [1/3] Without any bypass:
+rem first with your normal DNS, then with encrypted DNS - sites that only open with
+rem encrypted DNS are DNS-blocked (fixed by switching DNS, no DPI setting needed)
+set "SAVEDOH=%DOHARGS%"
+set "DOHARGS="
 call :probe %FULL_TIMEOUT% all
-set /a BASE_OK=OK, NB=0
+for /l %%i in (1,1,%N%) do call :sys_copy %%i
+set "DOHARGS=%SAVEDOH%"
+if defined DOHARGS call :probe %FULL_TIMEOUT% all
+set /a BASE_OK=OK, NB=0, NDNS=0
 for /l %%i in (1,1,%N%) do call :base_one %%i
 rem screening set S2[i]: the blocked sites (all sites if none is blocked); FB = first of them
 set /a SCRN=0, FB=0
@@ -208,6 +219,7 @@ if errorlevel 2 (
 ) else (
     call :install_service !WE! WA WN
 )
+call :offer_dns
 goto :finish
 
 :nothing_works
@@ -229,12 +241,20 @@ rem ======================= PER-ITEM STEPS =======================
 rem %1 = site number: mark blocked or not after the baseline probe
 if !R[%1]!==1 (
     set "B[%1]=0"
-    call :say "  OK       !S[%1]! (!T[%1]! ms)"
+    if !SYS[%1]!==1 call :say "  OK       !S[%1]! (!T[%1]! ms)"
+    if !SYS[%1]!==0 (
+        set /a NDNS+=1
+        call :say "  DNS-BLOCKED  !S[%1]! - opens with encrypted DNS (%DOHNAME%)"
+    )
 ) else (
     set "B[%1]=1"
     set /a NB+=1
     call :say "  BLOCKED  !S[%1]! - !M[%1]!"
 )
+goto :eof
+
+:sys_copy
+set "SYS[%1]=!R[%1]!"
 goto :eof
 
 :screen_site
@@ -625,16 +645,183 @@ if defined K[%1] (
         goto :eof
     )
 )
-rem seconds "2.772123" -> ms
+call :to_ms
+set "R[%1]=1"
+set "T[%1]=%ms%"
+set "M[%1]=HTTP !code!"
+set /a OK+=1, TOT+=ms
+goto :eof
+
+:to_ms
+rem tt = seconds like "2.772123" -> ms
+set "sec=0"
+set "frac=000"
 for /f "tokens=1,2 delims=.," %%a in ("!tt!") do (
     set "sec=%%a"
     set "frac=%%b000"
 )
 set /a ms=sec*1000 + 1!frac:~0,3! - 1000
-set "R[%1]=1"
-set "T[%1]=%ms%"
-set "M[%1]=HTTP !code!"
-set /a OK+=1, TOT+=ms
+goto :eof
+
+rem ======================= ENCRYPTED DNS =======================
+
+:dns_check
+rem Tries each DoH server; the fastest one that answers is used for every site test.
+rem Sets DOHARGS (extra curl options), DOHNAME, DOHURL and the plain DNS addresses.
+set "DOHARGS="
+set "DOHNAME="
+set "DOHIP="
+set /a BESTMS=99999, NDNS=0
+rem curl older than 7.62 cannot use DoH: "unknown option" gives exit code 2
+"%CURL%" -s -m 2 --doh-url https://127.0.0.1/ -o NUL http://127.0.0.1:9/ >nul 2>&1
+if errorlevel 2 if not errorlevel 3 (
+    echo Encrypted DNS: not supported by this curl version - using normal DNS.
+    goto :eof
+)
+echo Checking encrypted DNS servers:
+rem name | DoH address | DoH host | DoH IP | DNS 1 | DNS 2 | DNS IPv6
+for %%p in (
+    "Quad9|https://dns.quad9.net/dns-query|dns.quad9.net|9.9.9.9|9.9.9.9|149.112.112.112|2620:fe::fe"
+    "Cloudflare|https://cloudflare-dns.com/dns-query|cloudflare-dns.com|1.1.1.1|1.1.1.1|1.0.0.1|2606:4700:4700::1111"
+    "Google|https://dns.google/dns-query|dns.google|8.8.8.8|8.8.8.8|8.8.4.4|2001:4860:4860::8888"
+    "AdGuard|https://dns.adguard-dns.com/dns-query|dns.adguard-dns.com|94.140.14.14|94.140.14.14|94.140.15.15|2a10:50c0::ad1:ff"
+    "Yandex|https://common.dot.dns.yandex.net/dns-query|common.dot.dns.yandex.net|77.88.8.8|77.88.8.8|77.88.8.1|2a02:6b8::feed:0ff"
+    "OpenDNS|https://doh.opendns.com/dns-query|doh.opendns.com|146.112.41.2|208.67.222.222|208.67.220.220|2620:119:35::35"
+) do call :dns_try %%p
+if not defined DOHNAME (
+    echo   No encrypted DNS server answered - using normal DNS.
+    goto :eof
+)
+set "DOHARGS=--doh-url %DOHURL% %DOHPIN%"
+echo   Using %DOHNAME% ^(%BESTMS% ms^)
+goto :eof
+
+:dns_try
+rem %1 = one provider line. A standard DoH query for example.com must return HTTP 200.
+for /f "tokens=1-7 delims=|" %%a in (%1) do (
+    set "pn=%%a"
+    set "pu=%%b"
+    set "ph=%%c"
+    set "pi=%%d"
+    set "p1=%%e"
+    set "p2=%%f"
+    set "p6=%%g"
+)
+set "Q=?dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
+rem first with the server address fixed (immune to fake DNS), then via normal lookup
+set "pin=--resolve !ph!:443:!pi!"
+call :dns_query
+if not "!code!"=="200" (
+    set "pin="
+    call :dns_query
+)
+if not "!code!"=="200" (
+    echo   !pn!: no answer
+    goto :eof
+)
+call :to_ms
+echo   !pn!: !ms! ms
+if !ms! geq !BESTMS! goto :eof
+set /a BESTMS=ms
+set "DOHNAME=!pn!"
+set "DOHURL=!pu!"
+set "DOHPIN=!pin!"
+set "DOHIP=!p1!"
+set "DOHIP2=!p2!"
+set "DOHIP6=!p6!"
+goto :eof
+
+:dns_query
+set "code="
+set "tt=0.0"
+"%CURL%" -s -o NUL -m 4 !pin! -H "accept: application/dns-message" -w "%%{http_code} %%{time_total}" "!pu!!Q!" > "%TMPD%doh.txt" 2>nul
+for /f "usebackq tokens=1,2" %%a in ("%TMPD%doh.txt") do (
+    set "code=%%a"
+    set "tt=%%b"
+)
+goto :eof
+
+:offer_dns
+rem Browsing should use the same encrypted DNS. Asked once; 6_RESET_to_defaults.cmd undoes it.
+if not defined DOHIP goto :eof
+set "DNSCHOICE="
+if exist "%RES%dns_choice.txt" set /p DNSCHOICE=<"%RES%dns_choice.txt"
+if defined DNSCHOICE goto :offer_apply
+echo.
+echo Use %DOHNAME% encrypted DNS for browsing too? It stops DNS-based blocking.
+echo It changes your network's DNS setting ^(6_RESET_to_defaults.cmd puts it back^).
+choice /c YN /t 15 /d Y /n /m "Y = yes (recommended), N = no. Yes in 15 seconds: "
+rem check the answer right away: in .cmd files "set" resets the errorlevel
+if errorlevel 2 (set "DNSCHOICE=N") else (set "DNSCHOICE=Y")
+> "%RES%dns_choice.txt" echo !DNSCHOICE!
+:offer_apply
+if "!DNSCHOICE!"=="Y" call :apply_dns
+if "!DNSCHOICE!"=="N" if !NDNS! gtr 0 echo Note: !NDNS! site^(s^) are DNS-blocked and will stay blocked with your normal DNS.
+goto :eof
+
+:apply_dns
+if not exist "%RES%dns_backup.txt" call :backup_dns
+rem every network adapter that has a default route (column 5 = interface number)
+for /f "tokens=4,5" %%a in ('netsh interface ipv4 show route 2^>nul ^| findstr /c:"0.0.0.0/0"') do (
+    netsh interface ipv4 set dnsservers name=%%b static %DOHIP% primary validate=no >nul 2>&1
+    netsh interface ipv4 add dnsservers name=%%b %DOHIP2% index=2 validate=no >nul 2>&1
+    netsh interface ipv6 set dnsservers name=%%b static %DOHIP6% primary validate=no >nul 2>&1
+)
+rem Windows 11: encrypt system DNS for these servers (ignored on Windows 10)
+for %%s in (%DOHIP% %DOHIP2% %DOHIP6%) do netsh dns add encryption server=%%s dohtemplate=%DOHURL% autoupgrade=yes udpfallback=no >nul 2>&1
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" /v DoHPolicy /t REG_DWORD /d 2 /f >nul 2>&1
+ipconfig /flushdns >nul 2>&1
+echo DNS: now using %DOHNAME%. Browsers and Windows 11 encrypt it automatically.
+goto :eof
+
+:backup_dns
+rem saves how each adapter got its DNS before AutoDPI changed it
+> "%RES%dns_backup.txt" echo # interface^|dhcp   or   interface^|static^|address list
+for /f "tokens=4,5" %%a in ('netsh interface ipv4 show route 2^>nul ^| findstr /c:"0.0.0.0/0"') do call :backup_one %%b
+set "POL=none"
+for /f "tokens=3" %%v in ('reg query "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" /v DoHPolicy 2^>nul ^| findstr /i "DoHPolicy"') do set "POL=%%v"
+>> "%RES%dns_backup.txt" echo POLICY^|!POL!
+goto :eof
+
+:backup_one
+netsh interface ipv4 show dnsservers name=%1 2>nul | findstr /i "DHCP" >nul
+if not errorlevel 1 (
+    >> "%RES%dns_backup.txt" echo %1^|dhcp
+    goto :eof
+)
+set "ips="
+for /f "tokens=1,2 delims=:" %%x in ('netsh interface ipv4 show dnsservers name^=%1 2^>nul ^| findstr /r "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*"') do (
+    if "%%y"=="" (set "ips=!ips! %%x") else (set "ips=!ips! %%y")
+)
+>> "%RES%dns_backup.txt" echo %1^|static^|!ips!
+goto :eof
+
+:restore_dns
+if not exist "%RES%dns_backup.txt" goto :eof
+for /f "usebackq eol=# tokens=1-3 delims=|" %%a in ("%RES%dns_backup.txt") do call :restore_one %%a %%b "%%c"
+ipconfig /flushdns >nul 2>&1
+echo DNS settings restored.
+goto :eof
+
+:restore_one
+if "%1"=="POLICY" (
+    if "%2"=="none" (
+        reg delete "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" /v DoHPolicy /f >nul 2>&1
+    ) else (
+        reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" /v DoHPolicy /t REG_DWORD /d %2 /f >nul 2>&1
+    )
+    goto :eof
+)
+netsh interface ipv6 set dnsservers name=%1 source=dhcp >nul 2>&1
+if "%2"=="dhcp" (
+    netsh interface ipv4 set dnsservers name=%1 source=dhcp >nul 2>&1
+    goto :eof
+)
+set "n=0"
+for %%i in (%~3) do (
+    set /a n+=1
+    if !n!==1 (netsh interface ipv4 set dnsservers name=%1 static %%i primary validate=no >nul 2>&1) else (netsh interface ipv4 add dnsservers name=%1 %%i index=!n! validate=no >nul 2>&1)
+)
 goto :eof
 
 rem ======================= OTHER ACTIONS =======================
@@ -660,8 +847,9 @@ pause
 exit /b 0
 
 :act_reset
-choice /c YN /m "Reset AutoDPI to defaults (test sites, saved settings, results, autostart)"
+choice /c YN /m "Reset AutoDPI to defaults (test sites, saved settings, results, autostart, DNS)"
 if errorlevel 2 exit /b 0
+call :restore_dns
 call :stop_engines
 sc stop AutoDPI >nul 2>&1
 sc delete AutoDPI >nul 2>&1
